@@ -18,7 +18,7 @@ import streamlit as st
 import db
 from calculations import calculate_waterfall
 
-st.set_page_config(page_title="Household Budget", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Household Budget", page_icon="💰", layout="wide")
 
 EASY_ACCESS_COLOR = "#06A77D"
 LONG_TERM_COLOR = "#D5573B"
@@ -39,28 +39,39 @@ def go_to(view: str, month_id: int = None):
     st.rerun()
 
 
-def home_button():
-    if st.button("🏠 Home", key=f"home_{st.session_state.view}"):
-        go_to("dashboard")
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("## 💰 Household Budget")
+        if st.button("🏠 Dashboard", width="stretch"):
+            go_to("dashboard")
+        if st.button("⚙ Settings", width="stretch"):
+            go_to("settings")
+        st.divider()
+        view_labels = {
+            "dashboard": "Dashboard", "month_entry": "Editing a month",
+            "results": "Results", "settings": "Settings",
+        }
+        st.caption(f"Viewing: {view_labels.get(st.session_state.view, '')}")
 
 
 # ---------- calculation helper ----------
 
+@st.cache_data(ttl=5)
 def calculate_month(month_id: int):
     settings = db.get_settings()
     allowance = float(settings["allowance_per_person"])
     savings_rate = float(settings["savings_rate"])
     target = float(settings["easy_access_target"])
 
-    month = db.get_month(month_id)
-    cal_income = db.get_income_total_for_person(month_id, "Cal")
-    dani_income = db.get_income_total_for_person(month_id, "Dani")
-    bills_total = db.get_bills_total(month_id)
+    fin = db.get_month_financials(month_id)
+    if fin is None:
+        return None, None
 
-    return calculate_waterfall(
-        cal_income, dani_income, bills_total, allowance, savings_rate,
-        target, float(month["current_easy_access_balance"]),
-    ), month
+    result = calculate_waterfall(
+        fin["cal_income"], fin["dani_income"], fin["bills_total"], allowance,
+        savings_rate, target, fin["current_easy_access_balance"],
+    )
+    return result, fin
 
 
 # ---------- chart builders ----------
@@ -171,77 +182,151 @@ def parse_month_string(value: str):
     return None
 
 
+def money_delta(current, previous):
+    """Formats a delta string for st.metric, or None if there's no prior
+    month to compare against."""
+    if previous is None:
+        return None
+    diff = current - previous
+    if abs(diff) < 0.005:
+        return None
+    return f"£{diff:,.2f}"
+
+
 # ---------- Dashboard ----------
 
 def render_dashboard():
     st.title("💰 Household Budget")
 
-    latest = db.get_latest_confirmed_month()
-    if latest is not None:
-        result, month = calculate_month(latest["id"])
-        st.subheader(f"{calendar.month_name[month['month']]} {month['year']}")
+    all_months = db.get_all_months()
+    confirmed_sorted = sorted(
+        [m for m in all_months if m["confirmed"]], key=lambda m: (m["year"], m["month"])
+    )
+    latest = confirmed_sorted[-1] if confirmed_sorted else None
+    previous = confirmed_sorted[-2] if len(confirmed_sorted) >= 2 else None
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total income", f"£{result.total_income:,.2f}")
-        c2.metric("Bills", f"£{result.bills_total:,.2f}")
-        c3.metric("Allowances (both)", f"£{result.allowance_total:,.2f}")
-        c4, c5, c6 = st.columns(3)
-        c4.metric("Individual savings", f"£{result.individual_savings_total:,.2f}")
-        c5.metric("To easy-access", f"£{result.to_easy_access:,.2f}")
-        c6.metric("To long-term", f"£{result.to_long_term:,.2f}")
+    tab_overview, tab_transfers, tab_trends, tab_history = st.tabs(
+        ["Overview", "Transfers", "Trends", "History"]
+    )
 
-        if result.is_shortfall:
-            st.error(f"⚠ Shortfall this month: £{-result.remainder:,.2f}")
+    # ---------- Overview ----------
+    with tab_overview:
+        if latest is None:
+            st.info("No confirmed months yet - add one from the History tab.")
+        else:
+            result, fin = calculate_month(latest["id"])
+            prev_result, _ = calculate_month(previous["id"]) if previous else (None, None)
 
-        st.divider()
-        st.subheader("Transfers")
-        st.caption(
-            "What to move out of the joint account once both paychecks have "
-            "landed in it."
-        )
-        cal_bills = db.get_bills_total_by_tag(latest["id"], "Cal")
-        dani_bills = db.get_bills_total_by_tag(latest["id"], "Dani")
-        cal_total = result.allowance_per_person + cal_bills + result.cal_individual_savings
-        dani_total = result.allowance_per_person + dani_bills + result.dani_individual_savings
+            st.subheader(f"{calendar.month_name[fin['month']]} {fin['year']}")
 
-        col_cal, col_dani = st.columns(2)
-        with col_cal:
-            st.markdown("**To Cal**")
-            st.write(f"Spending - £{result.allowance_per_person:,.2f}")
-            st.write(f"Bills - £{cal_bills:,.2f}")
-            st.write(f"Savings - £{result.cal_individual_savings:,.2f}")
-            st.markdown(f"**Total - £{cal_total:,.2f}**")
-        with col_dani:
-            st.markdown("**To Dani**")
-            st.write(f"Spending - £{result.allowance_per_person:,.2f}")
-            st.write(f"Bills - £{dani_bills:,.2f}")
-            st.write(f"Savings - £{result.dani_individual_savings:,.2f}")
-            st.markdown(f"**Total - £{dani_total:,.2f}**")
+            with st.container(border=True):
+                c1, c2, c3 = st.columns(3)
+                c1.metric(
+                    "Total income", f"£{result.total_income:,.2f}",
+                    delta=money_delta(result.total_income, prev_result.total_income if prev_result else None),
+                )
+                c2.metric(
+                    "Bills", f"£{result.bills_total:,.2f}",
+                    delta=money_delta(result.bills_total, prev_result.bills_total if prev_result else None),
+                    delta_color="inverse",
+                )
+                c3.metric(
+                    "Allowances (both)", f"£{result.allowance_total:,.2f}",
+                    delta=money_delta(result.allowance_total, prev_result.allowance_total if prev_result else None),
+                )
+                c4, c5, c6 = st.columns(3)
+                c4.metric(
+                    "Individual savings", f"£{result.individual_savings_total:,.2f}",
+                    delta=money_delta(
+                        result.individual_savings_total,
+                        prev_result.individual_savings_total if prev_result else None,
+                    ),
+                )
+                c5.metric(
+                    "To easy-access", f"£{result.to_easy_access:,.2f}",
+                    delta=money_delta(result.to_easy_access, prev_result.to_easy_access if prev_result else None),
+                )
+                c6.metric(
+                    "To long-term", f"£{result.to_long_term:,.2f}",
+                    delta=money_delta(result.to_long_term, prev_result.to_long_term if prev_result else None),
+                )
 
-        st.caption(
-            "Bills tagged 'Joint' aren't listed here - they're paid directly from "
-            "the joint account, not transferred out."
-        )
+            if result.is_shortfall:
+                st.error(f"⚠ Shortfall this month: £{-result.remainder:,.2f}")
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("**Where this month's income went**")
-            pie = build_pie_figure(result)
-            if pie:
-                st.plotly_chart(pie, width='stretch')
-        with col_b:
-            st.markdown("**Easy-access savings progress**")
-            st.plotly_chart(build_gauge_figure(result), width='stretch')
-    else:
-        st.info("No confirmed months yet.")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                with st.container(border=True):
+                    st.markdown("**Where this month's income went**")
+                    pie = build_pie_figure(result)
+                    if pie:
+                        st.plotly_chart(pie, width="stretch")
+            with col_b:
+                with st.container(border=True):
+                    st.markdown("**Easy-access savings progress**")
+                    st.plotly_chart(build_gauge_figure(result), width="stretch")
 
-    st.divider()
+    # ---------- Transfers ----------
+    with tab_transfers:
+        if latest is None:
+            st.info("No confirmed months yet.")
+        else:
+            result, fin = calculate_month(latest["id"])
+            st.caption(
+                "What to move out of the joint account once both paychecks have "
+                "landed in it."
+            )
+            cal_total = result.allowance_per_person + fin["cal_bills"] + result.cal_individual_savings
+            dani_total = result.allowance_per_person + fin["dani_bills"] + result.dani_individual_savings
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("⚙ Settings"):
-            go_to("settings")
-    with col2:
+            col_cal, col_dani = st.columns(2)
+            with col_cal:
+                with st.container(border=True):
+                    st.markdown("**To Cal**")
+                    st.write(f"Spending - £{result.allowance_per_person:,.2f}")
+                    st.write(f"Bills - £{fin['cal_bills']:,.2f}")
+                    st.write(f"Savings - £{result.cal_individual_savings:,.2f}")
+                    st.markdown(f"**Total - £{cal_total:,.2f}**")
+            with col_dani:
+                with st.container(border=True):
+                    st.markdown("**To Dani**")
+                    st.write(f"Spending - £{result.allowance_per_person:,.2f}")
+                    st.write(f"Bills - £{fin['dani_bills']:,.2f}")
+                    st.write(f"Savings - £{result.dani_individual_savings:,.2f}")
+                    st.markdown(f"**Total - £{dani_total:,.2f}**")
+
+            st.caption(
+                "Bills tagged 'Joint' aren't listed here - they're paid directly from "
+                "the joint account, not transferred out."
+            )
+
+    # ---------- Trends ----------
+    with tab_trends:
+        recent = confirmed_sorted[-6:]
+        if recent:
+            with st.container(border=True):
+                st.subheader("Joint savings trend (last 6 months)")
+                st.plotly_chart(build_trend_figure(recent), width="stretch")
+        else:
+            st.caption("Not enough confirmed months yet to show a trend.")
+
+    # ---------- History ----------
+    with tab_history:
+        with st.container(border=True):
+            st.subheader("+ Add New Month")
+            suggested = datetime.date.today().strftime("%B %Y")
+            month_text = st.text_input("Month and year", value=suggested, key="new_month_text")
+            if st.button("Add / Open Month"):
+                parsed = parse_month_string(month_text)
+                if not parsed:
+                    st.error("Please enter it like 'September 2026' or 'Sep 2026'.")
+                else:
+                    year, month = parsed
+                    month_id = db.get_or_create_month(year, month)
+                    st.session_state.pop("loaded_month_id", None)
+                    go_to("month_entry", month_id=month_id)
+
+        st.write("")
         if st.button("⬇ Prepare CSV export"):
             st.session_state.csv_export_bytes = build_csv_bytes()
         if "csv_export_bytes" in st.session_state:
@@ -250,57 +335,33 @@ def render_dashboard():
                 file_name="household_budget_export.csv", mime="text/csv",
             )
 
-    st.divider()
-    st.subheader("Joint savings trend (last 6 months)")
-    all_months = db.get_all_months()
-    confirmed = sorted(
-        [m for m in all_months if m["confirmed"]], key=lambda m: (m["year"], m["month"])
-    )[-6:]
-    if confirmed:
-        st.plotly_chart(build_trend_figure(confirmed), width='stretch')
-    else:
-        st.caption("Not enough confirmed months yet to show a trend.")
+        st.write("")
+        st.subheader("Past months")
+        if not all_months:
+            st.caption("No months yet.")
+        for m in all_months:
+            label = f"{calendar.month_name[m['month']]} {m['year']}"
+            status = "✅ Confirmed" if m["confirmed"] else "📝 Draft"
+            with st.container(border=True):
+                row1, row2, row3 = st.columns([4, 2, 2])
+                row1.write(f"**{label}**  ·  {status}")
+                if row2.button("Open", key=f"open_{m['id']}"):
+                    st.session_state.pop("loaded_month_id", None)
+                    go_to("month_entry", month_id=m["id"])
+                if row3.button("Delete", key=f"delete_{m['id']}"):
+                    st.session_state.pending_delete_id = m["id"]
+                    st.rerun()
 
-    st.divider()
-    st.subheader("+ Add New Month")
-    suggested = datetime.date.today().strftime("%B %Y")
-    month_text = st.text_input("Month and year", value=suggested, key="new_month_text")
-    if st.button("Add / Open Month"):
-        parsed = parse_month_string(month_text)
-        if not parsed:
-            st.error("Please enter it like 'September 2026' or 'Sep 2026'.")
-        else:
-            year, month = parsed
-            month_id = db.get_or_create_month(year, month)
-            st.session_state.pop("loaded_month_id", None)
-            go_to("month_entry", month_id=month_id)
-
-    st.divider()
-    st.subheader("Past months")
-    if not all_months:
-        st.caption("No months yet.")
-    for m in all_months:
-        label = f"{calendar.month_name[m['month']]} {m['year']}"
-        status = "✅ Confirmed" if m["confirmed"] else "📝 Draft"
-        row1, row2, row3 = st.columns([4, 2, 2])
-        row1.write(f"**{label}**  ·  {status}")
-        if row2.button("Open", key=f"open_{m['id']}"):
-            st.session_state.pop("loaded_month_id", None)
-            go_to("month_entry", month_id=m["id"])
-        if row3.button("Delete", key=f"delete_{m['id']}"):
-            st.session_state.pending_delete_id = m["id"]
-            st.rerun()
-
-        if st.session_state.get("pending_delete_id") == m["id"]:
-            st.warning(f"Permanently delete {label}? This can't be undone.")
-            yes_col, no_col = st.columns(2)
-            if yes_col.button("Yes, delete", key=f"confirm_delete_{m['id']}"):
-                db.delete_month(m["id"])
-                st.session_state.pending_delete_id = None
-                st.rerun()
-            if no_col.button("Cancel", key=f"cancel_delete_{m['id']}"):
-                st.session_state.pending_delete_id = None
-                st.rerun()
+                if st.session_state.get("pending_delete_id") == m["id"]:
+                    st.warning(f"Permanently delete {label}? This can't be undone.")
+                    yes_col, no_col = st.columns(2)
+                    if yes_col.button("Yes, delete", key=f"confirm_delete_{m['id']}"):
+                        db.delete_month(m["id"])
+                        st.session_state.pending_delete_id = None
+                        st.rerun()
+                    if no_col.button("Cancel", key=f"cancel_delete_{m['id']}"):
+                        st.session_state.pending_delete_id = None
+                        st.rerun()
 
 
 # ---------- Month Entry ----------
@@ -324,49 +385,53 @@ def render_month_entry():
         st.session_state.loaded_month_id = month_id
 
     month = db.get_month(month_id)
-    home_button()
     st.title(f"{calendar.month_name[month['month']]} {month['year']}")
     if month["confirmed"]:
         st.warning("⚠ This month is already confirmed - edits will change saved figures.")
 
-    st.subheader("Bills & expenses this month")
+    with st.container(border=True):
+        st.subheader("Bills & expenses this month")
 
-    for row in list(st.session_state.bill_rows):
-        lid = row["local_id"]
-        c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
-        c1.text_input("Name", value=row["name"], key=f"name_{lid}", label_visibility="collapsed")
-        c2.number_input(
-            "Amount", value=float(row["amount"]), step=1.0, format="%.2f",
-            key=f"amount_{lid}", label_visibility="collapsed",
-        )
-        c3.selectbox(
-            "Tag", TAG_OPTIONS, index=TAG_OPTIONS.index(row["tag"]),
-            key=f"tag_{lid}", label_visibility="collapsed",
-        )
-        if c4.button("✕", key=f"remove_{lid}"):
-            if row.get("id"):
-                db.delete_bill_entry(row["id"])
-            st.session_state.bill_rows = [
-                r for r in st.session_state.bill_rows if r["local_id"] != lid
-            ]
+        for row in list(st.session_state.bill_rows):
+            lid = row["local_id"]
+            c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
+            c1.text_input("Name", value=row["name"], key=f"name_{lid}", label_visibility="collapsed")
+            c2.number_input(
+                "Amount", value=float(row["amount"]), step=1.0, format="%.2f",
+                key=f"amount_{lid}", label_visibility="collapsed",
+            )
+            c3.selectbox(
+                "Tag", TAG_OPTIONS, index=TAG_OPTIONS.index(row["tag"]),
+                key=f"tag_{lid}", label_visibility="collapsed",
+            )
+            if c4.button("✕", key=f"remove_{lid}"):
+                if row.get("id"):
+                    db.delete_bill_entry(row["id"])
+                st.session_state.bill_rows = [
+                    r for r in st.session_state.bill_rows if r["local_id"] != lid
+                ]
+                st.rerun()
+
+        if st.button("+ Add one-off bill / expense"):
+            st.session_state.bill_rows.append(
+                {"id": None, "name": "", "amount": 0.0, "tag": "Joint", "local_id": str(uuid.uuid4())}
+            )
             st.rerun()
 
-    if st.button("+ Add one-off bill / expense"):
-        st.session_state.bill_rows.append(
-            {"id": None, "name": "", "amount": 0.0, "tag": "Joint", "local_id": str(uuid.uuid4())}
-        )
-        st.rerun()
-
-    st.subheader("Income this month")
-    st.number_input("Cal - Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
-    st.number_input("Cal - RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
-    st.number_input("Dani - Income (£)", step=1.0, format="%.2f", key="dani_income_input")
-
-    st.subheader("Easy-access savings pot")
-    st.number_input(
-        "Current easy-access balance (£)", step=1.0, format="%.2f", key="easy_access_input",
-        help="Used to work out how much of this month's leftover tops the pot up to target.",
-    )
+    col_income, col_easy = st.columns(2)
+    with col_income:
+        with st.container(border=True):
+            st.subheader("Income this month")
+            st.number_input("Cal - Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
+            st.number_input("Cal - RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
+            st.number_input("Dani - Income (£)", step=1.0, format="%.2f", key="dani_income_input")
+    with col_easy:
+        with st.container(border=True):
+            st.subheader("Easy-access savings pot")
+            st.number_input(
+                "Current easy-access balance (£)", step=1.0, format="%.2f", key="easy_access_input",
+                help="Used to work out how much of this month's leftover tops the pot up to target.",
+            )
 
     def save_all_fields():
         for row in st.session_state.bill_rows:
@@ -391,7 +456,7 @@ def render_month_entry():
         if st.button("Confirm inputs"):
             save_all_fields()
             st.session_state.pop("loaded_month_id", None)  # force reload so new bills get real ids
-            st.success("Bills and incomes have been saved.")
+            st.toast("Bills and incomes have been saved.", icon="✅")
             st.rerun()
     with col2:
         if st.button("Confirm & Calculate >", type="primary"):
@@ -403,22 +468,22 @@ def render_month_entry():
 
 def render_results():
     month_id = st.session_state.month_id
-    result, month = calculate_month(month_id)
+    result, fin = calculate_month(month_id)
 
-    home_button()
-    st.title(f"{calendar.month_name[month['month']]} {month['year']} - Results")
+    st.title(f"{calendar.month_name[fin['month']]} {fin['year']} - Results")
 
-    st.write(f"Cal income: £{result.cal_income:,.2f}")
-    st.write(f"Dani income: £{result.dani_income:,.2f}")
-    st.write(f"**Total income: £{result.total_income:,.2f}**")
-    st.write(f"Bills & expenses: -£{result.bills_total:,.2f}")
-    st.write(f"Allowances (£{result.allowance_per_person:,.2f} x 2): -£{result.allowance_total:,.2f}")
-    st.write(f"Cal's individual savings ({result.savings_rate:.0%}): -£{result.cal_individual_savings:,.2f}")
-    st.write(f"Dani's individual savings ({result.savings_rate:.0%}): -£{result.dani_individual_savings:,.2f}")
-    st.write(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
-    st.divider()
-    st.write(f"To easy-access pot: £{result.to_easy_access:,.2f}")
-    st.write(f"To long-term pot: £{result.to_long_term:,.2f}")
+    with st.container(border=True):
+        st.write(f"Cal income: £{result.cal_income:,.2f}")
+        st.write(f"Dani income: £{result.dani_income:,.2f}")
+        st.write(f"**Total income: £{result.total_income:,.2f}**")
+        st.write(f"Bills & expenses: -£{result.bills_total:,.2f}")
+        st.write(f"Allowances (£{result.allowance_per_person:,.2f} x 2): -£{result.allowance_total:,.2f}")
+        st.write(f"Cal's individual savings ({result.savings_rate:.0%}): -£{result.cal_individual_savings:,.2f}")
+        st.write(f"Dani's individual savings ({result.savings_rate:.0%}): -£{result.dani_individual_savings:,.2f}")
+        st.write(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
+        st.divider()
+        st.write(f"To easy-access pot: £{result.to_easy_access:,.2f}")
+        st.write(f"To long-term pot: £{result.to_long_term:,.2f}")
 
     if result.is_shortfall:
         st.error(
@@ -434,41 +499,41 @@ def render_results():
     with col2:
         if st.button("Save month", type="primary"):
             db.set_month_confirmed(month_id, True)
-            st.success("This month has been saved.")
+            st.toast("This month has been saved.", icon="✅")
             go_to("dashboard")
 
 
 # ---------- Settings ----------
 
 def render_settings():
-    home_button()
     st.title("⚙ Settings")
 
     settings = db.get_settings()
-    allowance = st.number_input(
-        "Personal allowance per person (£)", value=float(settings["allowance_per_person"]),
-        step=1.0, format="%.2f",
-    )
-    rate_pct = st.number_input(
-        "Individual savings rate (%)", value=float(settings["savings_rate"]) * 100,
-        step=1.0, format="%.1f", min_value=0.0, max_value=100.0,
-    )
-    target = st.number_input(
-        "Easy-access savings target (£)", value=float(settings["easy_access_target"]),
-        step=1.0, format="%.2f",
-    )
+    with st.container(border=True):
+        allowance = st.number_input(
+            "Personal allowance per person (£)", value=float(settings["allowance_per_person"]),
+            step=1.0, format="%.2f",
+        )
+        rate_pct = st.number_input(
+            "Individual savings rate (%)", value=float(settings["savings_rate"]) * 100,
+            step=1.0, format="%.1f", min_value=0.0, max_value=100.0,
+        )
+        target = st.number_input(
+            "Easy-access savings target (£)", value=float(settings["easy_access_target"]),
+            step=1.0, format="%.2f",
+        )
 
-    st.caption(
-        "Changes apply the next time a month's figures are calculated - past "
-        "confirmed months are not recalculated retroactively."
-    )
+        st.caption(
+            "Changes apply the next time a month's figures are calculated - past "
+            "confirmed months are not recalculated retroactively."
+        )
 
-    if st.button("Save settings", type="primary"):
-        db.set_setting("allowance_per_person", allowance)
-        db.set_setting("savings_rate", rate_pct / 100)
-        db.set_setting("easy_access_target", target)
-        st.success("Settings updated.")
-        go_to("dashboard")
+        if st.button("Save settings", type="primary"):
+            db.set_setting("allowance_per_person", allowance)
+            db.set_setting("savings_rate", rate_pct / 100)
+            db.set_setting("easy_access_target", target)
+            st.toast("Settings updated.", icon="✅")
+            go_to("dashboard")
 
 
 # ---------- password gate ----------
@@ -500,6 +565,7 @@ def main():
         st.session_state.view = "dashboard"
 
     db.init_db()
+    render_sidebar()
 
     if st.session_state.view == "dashboard":
         render_dashboard()

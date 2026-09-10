@@ -350,6 +350,42 @@ def delete_bill_entry(entry_id: int):
         st.cache_data.clear()
 
 
+def get_month_financials(month_id: int):
+    """One round-trip for everything calculate_month() and the Transfers
+    section need, instead of four separate queries."""
+    conn = get_conn()
+    rows = conn.query(
+        """
+        SELECT
+            m.id, m.year, m.month, m.confirmed, m.current_easy_access_balance,
+            COALESCE((SELECT SUM(amount) FROM income_entries
+                      WHERE month_id = m.id AND person = 'Cal'), 0) AS cal_income,
+            COALESCE((SELECT SUM(amount) FROM income_entries
+                      WHERE month_id = m.id AND person = 'Dani'), 0) AS dani_income,
+            COALESCE((SELECT SUM(amount) FROM bill_entries
+                      WHERE month_id = m.id), 0) AS bills_total,
+            COALESCE((SELECT SUM(amount) FROM bill_entries
+                      WHERE month_id = m.id AND tag = 'Cal'), 0) AS cal_bills,
+            COALESCE((SELECT SUM(amount) FROM bill_entries
+                      WHERE month_id = m.id AND tag = 'Dani'), 0) AS dani_bills
+        FROM months m
+        WHERE m.id = :id
+        """,
+        params={"id": month_id}, ttl=5,
+    )
+    if rows.empty:
+        return None
+    r = rows.iloc[0]
+    return {
+        "id": int(r["id"]), "year": int(r["year"]), "month": int(r["month"]),
+        "confirmed": bool(r["confirmed"]),
+        "current_easy_access_balance": float(r["current_easy_access_balance"]),
+        "cal_income": float(r["cal_income"]), "dani_income": float(r["dani_income"]),
+        "bills_total": float(r["bills_total"]),
+        "cal_bills": float(r["cal_bills"]), "dani_bills": float(r["dani_bills"]),
+    }
+
+
 def get_bills_total(month_id: int) -> float:
     conn = get_conn()
     rows = conn.query(

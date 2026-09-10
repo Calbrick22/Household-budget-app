@@ -70,6 +70,31 @@ If it's still slow after redeploying this version, that's more likely
 network latency to your database region than the app itself - worth
 checking your Neon project's region is reasonably close to where you are.
 
+## What's new in this redesign
+
+**Look & feel:**
+- A custom colour theme (`.streamlit/config.toml`) using the same teal/
+  coral/yellow palette as the charts, instead of Streamlit's defaults.
+- Sidebar navigation (Dashboard / Settings) that's always visible, instead
+  of a "Home" button repeated on every page.
+- The dashboard is now organised into **Overview / Transfers / Trends /
+  History** tabs instead of one long scrolling page.
+- Card-style bordered sections group related content visually.
+- Save confirmations now use small toast pop-ups instead of banners.
+
+**Functional:**
+- **Month-over-month deltas** on the Overview tab - each figure shows how
+  it changed versus the previous confirmed month (e.g. "Bills £3,389.63,
+  ↓£120 vs last month"). Bills deltas are colour-inverted, since a
+  decrease is the good direction there.
+
+**Performance:**
+- What used to be 4-5 separate database queries per month shown is now a
+  single combined query (`get_month_financials`), and results are cached
+  for 5 seconds and automatically invalidated the moment you save
+  anything - so viewing the dashboard (which shows several months at
+  once for the trend chart) hits the database far less.
+
 ## One-time setup
 
 ### 1. Create a free Postgres database
