@@ -193,6 +193,36 @@ def render_dashboard():
         if result.is_shortfall:
             st.error(f"⚠ Shortfall this month: £{-result.remainder:,.2f}")
 
+        st.divider()
+        st.subheader("Transfers")
+        st.caption(
+            "What to move out of the joint account once both paychecks have "
+            "landed in it."
+        )
+        cal_bills = db.get_bills_total_by_tag(latest["id"], "Cal")
+        dani_bills = db.get_bills_total_by_tag(latest["id"], "Dani")
+        cal_total = result.allowance_per_person + cal_bills + result.cal_individual_savings
+        dani_total = result.allowance_per_person + dani_bills + result.dani_individual_savings
+
+        col_cal, col_dani = st.columns(2)
+        with col_cal:
+            st.markdown("**To Cal**")
+            st.write(f"Spending - £{result.allowance_per_person:,.2f}")
+            st.write(f"Bills - £{cal_bills:,.2f}")
+            st.write(f"Savings - £{result.cal_individual_savings:,.2f}")
+            st.markdown(f"**Total - £{cal_total:,.2f}**")
+        with col_dani:
+            st.markdown("**To Dani**")
+            st.write(f"Spending - £{result.allowance_per_person:,.2f}")
+            st.write(f"Bills - £{dani_bills:,.2f}")
+            st.write(f"Savings - £{result.dani_individual_savings:,.2f}")
+            st.markdown(f"**Total - £{dani_total:,.2f}**")
+
+        st.caption(
+            "Bills tagged 'Joint' aren't listed here - they're paid directly from "
+            "the joint account, not transferred out."
+        )
+
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("**Where this month's income went**")

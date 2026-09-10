@@ -130,6 +130,17 @@ streamlit run app.py
 4. Deploy. You'll get a URL like `https://your-app-name.streamlit.app` -
    that's what you open from any device.
 
+## Transfers section
+
+The dashboard now includes a **Transfers** breakdown for the latest
+confirmed month - what to move out of the joint account, split by person:
+spending allowance, bills tagged to that person (paid from their own
+account rather than Joint), and their individual savings, plus a total.
+This is what vindicated keeping the Joint/Cal/Dani tags on bills - they
+were originally kept just for visibility, but now directly drive this
+calculation. Bills tagged "Joint" are excluded, since those get paid
+straight from the joint account rather than transferred out.
+
 ## Using it each month
 
 1. **+ Add New Month** on the dashboard - type the month/year (it suggests

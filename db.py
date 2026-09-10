@@ -359,6 +359,17 @@ def get_bills_total(month_id: int) -> float:
     return float(rows.iloc[0]["total"])
 
 
+def get_bills_total_by_tag(month_id: int, tag: str) -> float:
+    if tag not in VALID_TAGS:
+        raise ValueError(f"tag must be one of {VALID_TAGS}")
+    conn = get_conn()
+    rows = conn.query(
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM bill_entries WHERE month_id = :mid AND tag = :tag",
+        params={"mid": month_id, "tag": tag}, ttl=5,
+    )
+    return float(rows.iloc[0]["total"])
+
+
 # ---------- income entries ----------
 
 def set_income(month_id: int, person: str, source: str, amount: float):
