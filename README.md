@@ -95,18 +95,25 @@ checking your Neon project's region is reasonably close to where you are.
   anything - so viewing the dashboard (which shows several months at
   once for the trend chart) hits the database far less.
 
-## What's new in this update
-
-**Look & feel:**
-- A warmer, pastel colour palette throughout (cream background, soft
-  rounded cards with subtle shadows) instead of Streamlit's stark
-  defaults.
+### Look & feel (v2 - properly verified this time)
+- A bolder pastel palette throughout: warm gradient background, coloured
+  sidebar, and every major section (Overview, Bills, Income, Transfers,
+  Settings, Recurring bills) has its own distinct pastel gradient card,
+  with a soft lift-and-shadow effect on hover.
 - Cal-specific sections (his income fields, his Transfers card) use a
   pastel green accent; Dani-specific sections use a pastel coral accent.
+- Buttons have a subtle hover-lift, and saving a month now pops a little
+  confetti (`st.balloons()`) as a celebratory touch.
+- The first version of this styling only worked on the Transfers cards,
+  because the CSS was guessing at Streamlit's internal container
+  structure and guessed wrong. This version was verified by actually
+  rendering the app in a headless browser and inspecting the real DOM
+  before writing the final CSS selectors - screenshotted every page to
+  confirm the colours actually apply, not just that the code runs.
 - "+ Add New Month" now sits directly on the main dashboard rather than
   tucked inside the History tab.
 
-**Recurring bills (Settings):**
+### Recurring bills (Settings)
 - A real fix, not just a UI addition: **new months now always build their
   bill list from a proper "recurring bills" master list**, rather than
   copying whatever the previous month happened to contain. This means:

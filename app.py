@@ -11,6 +11,7 @@ import csv
 import datetime
 import io
 import uuid
+from contextlib import contextmanager
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -27,45 +28,112 @@ PERSONAL_COLOR = "#F2C14E"
 SAVINGS_COLOR = "#06A77D"
 GAUGE_BANDS = [(0, 50, "#D5573B"), (50, 80, "#F2C14E"), (80, 100, "#06A77D")]
 
-CAL_BG = "#D9EEDD"      # pastel green
-CAL_TEXT = "#2F5D45"
-DANI_BG = "#FBDCD3"     # pastel coral
-DANI_TEXT = "#8B4038"
+CAL_BG = "#CDEDD6"      # pastel green
+CAL_TEXT = "#265C3E"
+DANI_BG = "#FBD2C4"     # pastel coral
+DANI_TEXT = "#8B3A2B"
 
 TAG_OPTIONS = ["Joint", "Cal", "Dani"]
 
-CUSTOM_CSS = """
+# Each card "type" gets its own gradient - marker div + CSS :has() is the
+# reliable way to colour an actual st.container(border=True), since it
+# targets Streamlit's own DOM structure rather than guessing test-ids.
+CARD_PALETTE = {
+    "card-overview": ("#E3EFFB", "#F5FAFF"),      # dusty blue
+    "card-charts": ("#FFF3D2", "#FFFBEF"),        # warm yellow
+    "card-bills": ("#F6E9D2", "#FFFAF1"),         # sand
+    "card-cal-income": ("#D3F0DC", "#EFFBF2"),    # pastel green
+    "card-dani-income": ("#FCDCD0", "#FEF3EF"),   # pastel coral
+    "card-easy": ("#D9F2E6", "#F1FBF6"),          # mint
+    "card-settings": ("#EBDFF6", "#F9F5FC"),      # lavender
+    "card-recurring": ("#FCE4CF", "#FFF7EF"),     # peach
+    "card-trends": ("#DCEAFB", "#F3F8FF"),        # sky blue
+    "card-history": ("#FBEBC8", "#FFFBF0"),       # warm cream/gold
+    "card-add-month": ("#E4F0DE", "#F5FAF2"),     # soft leaf green
+}
+
+
+def _card_css() -> str:
+    blocks = []
+    for cls, (start, end) in CARD_PALETTE.items():
+        blocks.append(f"""
+        div[data-testid="stVerticalBlock"]:has(> div[data-testid="stElementContainer"] div.{cls}) {{
+            background: linear-gradient(135deg, {start} 0%, {end} 100%) !important;
+            border-radius: 20px !important;
+            padding: 22px 24px !important;
+            border: 1px solid rgba(0,0,0,0.05) !important;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }}
+        div[data-testid="stVerticalBlock"]:has(> div[data-testid="stElementContainer"] div.{cls}):hover {{
+            transform: translateY(-3px);
+            box-shadow: 0 12px 24px rgba(74, 64, 58, 0.12);
+        }}
+        """)
+    return "\n".join(blocks)
+
+
+CUSTOM_CSS = f"""
 <style>
-/* Soften native bordered containers for a homely feel */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 18px !important;
-    border: 1px solid #EDE0CF !important;
-    box-shadow: 0 2px 10px rgba(139, 115, 85, 0.08);
-}
+/* Warm gradient backdrop for the whole app */
+.stApp {{
+    background: linear-gradient(160deg, #FFF3E6 0%, #FFFBF5 55%, #FFEFDD 100%);
+}}
 
-/* Sidebar warmth */
-section[data-testid="stSidebar"] {
-    background-color: #FBEFE1;
-}
+/* Sidebar */
+section[data-testid="stSidebar"] {{
+    background: linear-gradient(180deg, #F7E0C7 0%, #F2D2AE 100%);
+}}
 
-/* Person-specific accent cards */
-.person-card {
-    border-radius: 18px;
+/* Buttons - soft lift on hover */
+.stButton > button, .stDownloadButton > button {{
+    border-radius: 12px !important;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}}
+.stButton > button:hover, .stDownloadButton > button:hover {{
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(95, 163, 127, 0.30);
+}}
+
+/* Tabs - a little more breathing room and a warmer active indicator */
+button[data-baseweb="tab"] {{
+    border-radius: 10px 10px 0 0 !important;
+}}
+
+/* Person-specific accent cards (Transfers, etc.) */
+.person-card {{
+    border-radius: 20px;
     padding: 20px 22px;
     margin-bottom: 12px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-.cal-card { background-color: %(cal_bg)s; color: %(cal_text)s; }
-.dani-card { background-color: %(dani_bg)s; color: %(dani_text)s; }
-.person-card h4 { margin-top: 0; margin-bottom: 10px; }
-.person-card p { margin: 4px 0; font-size: 0.95rem; }
-.person-card .total-line { font-weight: 700; margin-top: 10px; font-size: 1.05rem; }
+    box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}}
+.person-card:hover {{
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.10);
+}}
+.cal-card {{ background: linear-gradient(135deg, {CAL_BG} 0%, #E9F8ED 100%); color: {CAL_TEXT}; }}
+.dani-card {{ background: linear-gradient(135deg, {DANI_BG} 0%, #FEEAE2 100%); color: {DANI_TEXT}; }}
+.person-card h4 {{ margin-top: 0; margin-bottom: 10px; }}
+.person-card p {{ margin: 4px 0; font-size: 0.95rem; }}
+.person-card .total-line {{ font-weight: 700; margin-top: 10px; font-size: 1.05rem; }}
+
+{_card_css()}
 </style>
-""" % {"cal_bg": CAL_BG, "cal_text": CAL_TEXT, "dani_bg": DANI_BG, "dani_text": DANI_TEXT}
+"""
 
 
 def inject_custom_css():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+@contextmanager
+def styled_container(marker_class: str, border: bool = True):
+    """A st.container(border=True) that's reliably colourable via CSS -
+    injects a hidden marker div that the :has() rules above target."""
+    c = st.container(border=border)
+    c.markdown(f'<div class="{marker_class}"></div>', unsafe_allow_html=True)
+    with c:
+        yield c
 
 
 def person_card_html(title: str, spending: float, bills: float, savings: float, total: float, css_class: str) -> str:
@@ -242,7 +310,7 @@ def money_delta(current, previous):
 
 
 def render_add_month_section():
-    with st.container(border=True):
+    with styled_container("card-add-month"):
         st.subheader("+ Add New Month")
         suggested = datetime.date.today().strftime("%B %Y")
         month_text = st.text_input("Month and year", value=suggested, key="new_month_text")
@@ -285,7 +353,7 @@ def render_dashboard():
 
             st.subheader(f"{calendar.month_name[fin['month']]} {fin['year']}")
 
-            with st.container(border=True):
+            with styled_container("card-overview"):
                 c1, c2, c3 = st.columns(3)
                 c1.metric(
                     "Total income", f"£{result.total_income:,.2f}",
@@ -322,13 +390,13 @@ def render_dashboard():
 
             col_a, col_b = st.columns(2)
             with col_a:
-                with st.container(border=True):
+                with styled_container("card-charts"):
                     st.markdown("**Where this month's income went**")
                     pie = build_pie_figure(result)
                     if pie:
                         st.plotly_chart(pie, width="stretch")
             with col_b:
-                with st.container(border=True):
+                with styled_container("card-charts"):
                     st.markdown("**Easy-access savings progress**")
                     st.plotly_chart(build_gauge_figure(result), width="stretch")
 
@@ -372,7 +440,7 @@ def render_dashboard():
     with tab_trends:
         recent = confirmed_sorted[-6:]
         if recent:
-            with st.container(border=True):
+            with styled_container("card-trends"):
                 st.subheader("Joint savings trend (last 6 months)")
                 st.plotly_chart(build_trend_figure(recent), width="stretch")
         else:
@@ -395,7 +463,7 @@ def render_dashboard():
         for m in all_months:
             label = f"{calendar.month_name[m['month']]} {m['year']}"
             status = "✅ Confirmed" if m["confirmed"] else "📝 Draft"
-            with st.container(border=True):
+            with styled_container("card-history"):
                 row1, row2, row3 = st.columns([4, 2, 2])
                 row1.write(f"**{label}**  ·  {status}")
                 if row2.button("Open", key=f"open_{m['id']}"):
@@ -442,7 +510,7 @@ def render_month_entry():
     if month["confirmed"]:
         st.warning("⚠ This month is already confirmed - edits will change saved figures.")
 
-    with st.container(border=True):
+    with styled_container("card-bills"):
         st.subheader("Bills & expenses this month")
 
         for row in list(st.session_state.bill_rows):
@@ -479,16 +547,16 @@ def render_month_entry():
 
     col_cal, col_dani = st.columns(2)
     with col_cal:
-        with st.container(border=True):
+        with styled_container("card-cal-income"):
             st.markdown(f"<h4 style='color:{CAL_TEXT};'>🟢 Cal's income</h4>", unsafe_allow_html=True)
             st.number_input("Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
             st.number_input("RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
     with col_dani:
-        with st.container(border=True):
+        with styled_container("card-dani-income"):
             st.markdown(f"<h4 style='color:{DANI_TEXT};'>🩷 Dani's income</h4>", unsafe_allow_html=True)
             st.number_input("Income (£)", step=1.0, format="%.2f", key="dani_income_input")
 
-    with st.container(border=True):
+    with styled_container("card-easy"):
         st.subheader("Easy-access savings pot")
         st.number_input(
             "Current easy-access balance (£)", step=1.0, format="%.2f", key="easy_access_input",
@@ -534,7 +602,7 @@ def render_results():
 
     st.title(f"{calendar.month_name[fin['month']]} {fin['year']} - Results")
 
-    with st.container(border=True):
+    with styled_container("card-overview"):
         st.write(f"Cal income: £{result.cal_income:,.2f}")
         st.write(f"Dani income: £{result.dani_income:,.2f}")
         st.write(f"**Total income: £{result.total_income:,.2f}**")
@@ -562,6 +630,7 @@ def render_results():
         if st.button("Save month", type="primary"):
             db.set_month_confirmed(month_id, True)
             st.toast("This month has been saved.", icon="✅")
+            st.balloons()
             go_to("dashboard")
 
 
@@ -571,7 +640,7 @@ def render_settings():
     st.title("⚙ Settings")
 
     settings = db.get_settings()
-    with st.container(border=True):
+    with styled_container("card-settings"):
         st.subheader("Waterfall settings")
         allowance = st.number_input(
             "Personal allowance per person (£)", value=float(settings["allowance_per_person"]),
@@ -603,7 +672,7 @@ def render_settings():
 
 
 def render_recurring_bills_section():
-    with st.container(border=True):
+    with styled_container("card-recurring"):
         st.subheader("Recurring bills")
         st.caption(
             "This is the master list new months are built from. Update an amount here "
