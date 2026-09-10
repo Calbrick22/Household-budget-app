@@ -212,10 +212,13 @@ def render_dashboard():
         if st.button("⚙ Settings"):
             go_to("settings")
     with col2:
-        st.download_button(
-            "⬇ Export CSV", data=build_csv_bytes(),
-            file_name="household_budget_export.csv", mime="text/csv",
-        )
+        if st.button("⬇ Prepare CSV export"):
+            st.session_state.csv_export_bytes = build_csv_bytes()
+        if "csv_export_bytes" in st.session_state:
+            st.download_button(
+                "Download CSV", data=st.session_state.csv_export_bytes,
+                file_name="household_budget_export.csv", mime="text/csv",
+            )
 
     st.divider()
     st.subheader("Joint savings trend (last 6 months)")
@@ -438,9 +441,31 @@ def render_settings():
         go_to("dashboard")
 
 
+# ---------- password gate ----------
+
+def check_password() -> bool:
+    """Simple shared-password gate - no usernames, just one password for
+    both of you, set in secrets.toml as app_password."""
+    if st.session_state.get("password_correct", False):
+        return True
+
+    st.title("💰 Household Budget")
+    entered = st.text_input("Password", type="password", key="password_input")
+    if entered:
+        if entered == st.secrets.get("app_password"):
+            st.session_state.password_correct = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+
 # ---------- main ----------
 
 def main():
+    if not check_password():
+        st.stop()
+
     if "view" not in st.session_state:
         st.session_state.view = "dashboard"
 

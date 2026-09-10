@@ -38,6 +38,38 @@ data. This version uses a small hosted Postgres database instead, which
 persists properly. Both Supabase and Neon have a free tier that's more
 than enough for a two-person household budget.
 
+## Password protection
+
+The app now sits behind a single shared password (no separate accounts -
+you both use the same one). Set it in secrets as `app_password`:
+
+```toml
+app_password = "choose-a-password"
+```
+
+Add this line to both your local `secrets.toml` and Streamlit Cloud's
+Secrets panel (see `.streamlit/secrets.toml.example` for where it sits
+relative to the database section), then reboot the app. You'll see a
+password field before anything else loads.
+
+## Performance
+
+Two changes address the sluggishness from before:
+
+- **Startup setup only runs once per app instance**, not on every click -
+  it was previously re-checking and re-seeding the database on every
+  single interaction.
+- **Reads are cached for 5 seconds** and automatically invalidated the
+  moment you save anything, so you still always see your own latest
+  changes - you're just not hitting the database on every keystroke for
+  data that hasn't changed.
+- **The CSV export no longer rebuilds on every rerun** - it only computes
+  when you click "Prepare CSV export".
+
+If it's still slow after redeploying this version, that's more likely
+network latency to your database region than the app itself - worth
+checking your Neon project's region is reasonably close to where you are.
+
 ## One-time setup
 
 ### 1. Create a free Postgres database

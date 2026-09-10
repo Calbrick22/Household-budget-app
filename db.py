@@ -102,6 +102,11 @@ SCHEMA_STATEMENTS = [
 
 
 def init_db():
+    _ensure_initialized()
+
+
+@st.cache_resource
+def _ensure_initialized():
     conn = get_conn()
     with conn.session as s:
         for statement in SCHEMA_STATEMENTS:
@@ -119,7 +124,7 @@ def init_db():
             )
         s.commit()
 
-    templates = conn.query("SELECT id FROM bill_templates", ttl=0)
+    templates = conn.query("SELECT id FROM bill_templates", ttl=5)
     if templates.empty:
         with conn.session as s:
             for name, amount, tag in STARTER_BILLS:
@@ -131,13 +136,14 @@ def init_db():
                     {"name": name, "amount": amount, "tag": tag},
                 )
             s.commit()
+    return True
 
 
 # ---------- settings ----------
 
 def get_settings():
     conn = get_conn()
-    rows = conn.query("SELECT key, value FROM settings", ttl=0)
+    rows = conn.query("SELECT key, value FROM settings", ttl=5)
     return {r["key"]: r["value"] for _, r in rows.iterrows()}
 
 
@@ -152,6 +158,7 @@ def set_setting(key, value):
             {"key": key, "value": str(value)},
         )
         s.commit()
+        st.cache_data.clear()
 
 
 # ---------- bill templates ----------
@@ -160,7 +167,7 @@ def get_active_bill_templates():
     conn = get_conn()
     rows = conn.query(
         "SELECT id, name, default_amount, tag FROM bill_templates WHERE active = TRUE ORDER BY name",
-        ttl=0,
+        ttl=5,
     )
     return rows.to_dict("records")
 
@@ -171,7 +178,7 @@ def get_or_create_month(year: int, month: int) -> int:
     conn = get_conn()
     existing = conn.query(
         "SELECT id FROM months WHERE year = :year AND month = :month",
-        params={"year": year, "month": month}, ttl=0,
+        params={"year": year, "month": month}, ttl=5,
     )
     if not existing.empty:
         return int(existing.iloc[0]["id"])
@@ -186,10 +193,11 @@ def get_or_create_month(year: int, month: int) -> int:
         )
         month_id = result.scalar()
         s.commit()
+        st.cache_data.clear()
 
     other_months = conn.query(
         "SELECT id, year, month FROM months WHERE id != :id ORDER BY year DESC, month DESC LIMIT 1",
-        params={"id": month_id}, ttl=0,
+        params={"id": month_id}, ttl=5,
     )
 
     with conn.session as s:
@@ -197,7 +205,7 @@ def get_or_create_month(year: int, month: int) -> int:
             prev_id = int(other_months.iloc[0]["id"])
             prev_bills = conn.query(
                 "SELECT name, amount, tag, template_id FROM bill_entries WHERE month_id = :mid",
-                params={"mid": prev_id}, ttl=0,
+                params={"mid": prev_id}, ttl=5,
             )
             for _, b in prev_bills.iterrows():
                 s.execute(
@@ -213,7 +221,7 @@ def get_or_create_month(year: int, month: int) -> int:
         else:
             templates = conn.query(
                 "SELECT id, name, default_amount, tag FROM bill_templates WHERE active = TRUE",
-                ttl=0,
+                ttl=5,
             )
             for _, t in templates.iterrows():
                 s.execute(
@@ -227,6 +235,7 @@ def get_or_create_month(year: int, month: int) -> int:
                     },
                 )
         s.commit()
+        st.cache_data.clear()
 
     return int(month_id)
 
@@ -236,7 +245,7 @@ def get_all_months():
     rows = conn.query(
         "SELECT id, year, month, confirmed, current_easy_access_balance "
         "FROM months ORDER BY year DESC, month DESC",
-        ttl=0,
+        ttl=5,
     )
     return rows.to_dict("records")
 
@@ -246,7 +255,7 @@ def get_latest_confirmed_month():
     rows = conn.query(
         "SELECT id, year, month, confirmed, current_easy_access_balance "
         "FROM months WHERE confirmed = TRUE ORDER BY year DESC, month DESC LIMIT 1",
-        ttl=0,
+        ttl=5,
     )
     return rows.to_dict("records")[0] if not rows.empty else None
 
@@ -256,7 +265,7 @@ def get_month(month_id: int):
     rows = conn.query(
         "SELECT id, year, month, confirmed, current_easy_access_balance "
         "FROM months WHERE id = :id",
-        params={"id": month_id}, ttl=0,
+        params={"id": month_id}, ttl=5,
     )
     return rows.to_dict("records")[0] if not rows.empty else None
 
@@ -269,6 +278,7 @@ def set_month_confirmed(month_id: int, confirmed: bool):
             {"confirmed": confirmed, "id": month_id},
         )
         s.commit()
+        st.cache_data.clear()
 
 
 def set_easy_access_balance(month_id: int, balance: float):
@@ -279,6 +289,7 @@ def set_easy_access_balance(month_id: int, balance: float):
             {"balance": balance, "id": month_id},
         )
         s.commit()
+        st.cache_data.clear()
 
 
 def delete_month(month_id: int):
@@ -286,6 +297,7 @@ def delete_month(month_id: int):
     with conn.session as s:
         s.execute(text("DELETE FROM months WHERE id = :id"), {"id": month_id})
         s.commit()
+        st.cache_data.clear()
 
 
 # ---------- bill entries ----------
@@ -294,7 +306,7 @@ def get_bill_entries(month_id: int):
     conn = get_conn()
     rows = conn.query(
         "SELECT id, name, amount, tag FROM bill_entries WHERE month_id = :mid ORDER BY name",
-        params={"mid": month_id}, ttl=0,
+        params={"mid": month_id}, ttl=5,
     )
     return rows.to_dict("records")
 
@@ -313,6 +325,7 @@ def add_bill_entry(month_id: int, name: str, amount: float, tag: str) -> int:
         )
         new_id = result.scalar()
         s.commit()
+        st.cache_data.clear()
     return int(new_id)
 
 
@@ -326,6 +339,7 @@ def update_bill_entry(entry_id: int, name: str, amount: float, tag: str):
             {"name": name, "amount": amount, "tag": tag, "id": entry_id},
         )
         s.commit()
+        st.cache_data.clear()
 
 
 def delete_bill_entry(entry_id: int):
@@ -333,13 +347,14 @@ def delete_bill_entry(entry_id: int):
     with conn.session as s:
         s.execute(text("DELETE FROM bill_entries WHERE id = :id"), {"id": entry_id})
         s.commit()
+        st.cache_data.clear()
 
 
 def get_bills_total(month_id: int) -> float:
     conn = get_conn()
     rows = conn.query(
         "SELECT COALESCE(SUM(amount), 0) AS total FROM bill_entries WHERE month_id = :mid",
-        params={"mid": month_id}, ttl=0,
+        params={"mid": month_id}, ttl=5,
     )
     return float(rows.iloc[0]["total"])
 
@@ -371,13 +386,14 @@ def set_income(month_id: int, person: str, source: str, amount: float):
                 {"mid": month_id, "person": person, "source": source, "amount": amount},
             )
         s.commit()
+        st.cache_data.clear()
 
 
 def get_income_entries(month_id: int):
     conn = get_conn()
     rows = conn.query(
         "SELECT person, source, amount FROM income_entries WHERE month_id = :mid",
-        params={"mid": month_id}, ttl=0,
+        params={"mid": month_id}, ttl=5,
     )
     return rows.to_dict("records")
 
@@ -387,6 +403,6 @@ def get_income_total_for_person(month_id: int, person: str) -> float:
     rows = conn.query(
         "SELECT COALESCE(SUM(amount), 0) AS total FROM income_entries "
         "WHERE month_id = :mid AND person = :person",
-        params={"mid": month_id, "person": person}, ttl=0,
+        params={"mid": month_id, "person": person}, ttl=5,
     )
     return float(rows.iloc[0]["total"])
