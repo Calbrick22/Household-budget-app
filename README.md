@@ -95,6 +95,33 @@ checking your Neon project's region is reasonably close to where you are.
   anything - so viewing the dashboard (which shows several months at
   once for the trend chart) hits the database far less.
 
+## What's new in this update
+
+**Look & feel:**
+- A warmer, pastel colour palette throughout (cream background, soft
+  rounded cards with subtle shadows) instead of Streamlit's stark
+  defaults.
+- Cal-specific sections (his income fields, his Transfers card) use a
+  pastel green accent; Dani-specific sections use a pastel coral accent.
+- "+ Add New Month" now sits directly on the main dashboard rather than
+  tucked inside the History tab.
+
+**Recurring bills (Settings):**
+- A real fix, not just a UI addition: **new months now always build their
+  bill list from a proper "recurring bills" master list**, rather than
+  copying whatever the previous month happened to contain. This means:
+  - Editing a bill's amount - either in Month Entry *or* in the new
+    Settings → Recurring bills list - updates the master list, so the
+    change carries forward automatically. Update the water bill the
+    moment it goes up; you don't need to wait for next month.
+  - Genuine one-off items (added via "+ Add one-off bill" in Month Entry)
+    stay one-off, as originally intended - they won't silently keep
+    reappearing every month.
+  - You can add a brand-new recurring bill or retire an old one directly
+    from Settings, without needing to open a specific month.
+- This only changes how *new* months are built going forward - nothing
+  about your existing saved months changes when you deploy this update.
+
 ## One-time setup
 
 ### 1. Create a free Postgres database

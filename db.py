@@ -172,6 +172,52 @@ def get_active_bill_templates():
     return rows.to_dict("records")
 
 
+def add_bill_template(name: str, default_amount: float, tag: str) -> int:
+    if tag not in VALID_TAGS:
+        raise ValueError(f"tag must be one of {VALID_TAGS}")
+    conn = get_conn()
+    with conn.session as s:
+        result = s.execute(
+            text(
+                "INSERT INTO bill_templates (name, default_amount, tag, active) "
+                "VALUES (:name, :amount, :tag, TRUE) RETURNING id"
+            ),
+            {"name": name, "amount": default_amount, "tag": tag},
+        )
+        new_id = result.scalar()
+        s.commit()
+        st.cache_data.clear()
+    return int(new_id)
+
+
+def update_bill_template(template_id: int, name: str, default_amount: float, tag: str):
+    if tag not in VALID_TAGS:
+        raise ValueError(f"tag must be one of {VALID_TAGS}")
+    conn = get_conn()
+    with conn.session as s:
+        s.execute(
+            text(
+                "UPDATE bill_templates SET name = :name, default_amount = :amount, tag = :tag "
+                "WHERE id = :id"
+            ),
+            {"name": name, "amount": default_amount, "tag": tag, "id": template_id},
+        )
+        s.commit()
+        st.cache_data.clear()
+
+
+def deactivate_bill_template(template_id: int):
+    """Soft-delete - removes it from future months' seeding without
+    touching any bill_entries that already reference it historically."""
+    conn = get_conn()
+    with conn.session as s:
+        s.execute(
+            text("UPDATE bill_templates SET active = FALSE WHERE id = :id"), {"id": template_id}
+        )
+        s.commit()
+        st.cache_data.clear()
+
+
 # ---------- months ----------
 
 def get_or_create_month(year: int, month: int) -> int:
@@ -195,45 +241,22 @@ def get_or_create_month(year: int, month: int) -> int:
         s.commit()
         st.cache_data.clear()
 
-    other_months = conn.query(
-        "SELECT id, year, month FROM months WHERE id != :id ORDER BY year DESC, month DESC LIMIT 1",
-        params={"id": month_id}, ttl=5,
-    )
-
     with conn.session as s:
-        if not other_months.empty:
-            prev_id = int(other_months.iloc[0]["id"])
-            prev_bills = conn.query(
-                "SELECT name, amount, tag, template_id FROM bill_entries WHERE month_id = :mid",
-                params={"mid": prev_id}, ttl=5,
+        templates = conn.query(
+            "SELECT id, name, default_amount, tag FROM bill_templates WHERE active = TRUE",
+            ttl=5,
+        )
+        for _, t in templates.iterrows():
+            s.execute(
+                text(
+                    "INSERT INTO bill_entries (month_id, name, amount, tag, template_id) "
+                    "VALUES (:mid, :name, :amount, :tag, :tid)"
+                ),
+                {
+                    "mid": month_id, "name": t["name"], "amount": float(t["default_amount"]),
+                    "tag": t["tag"], "tid": int(t["id"]),
+                },
             )
-            for _, b in prev_bills.iterrows():
-                s.execute(
-                    text(
-                        "INSERT INTO bill_entries (month_id, name, amount, tag, template_id) "
-                        "VALUES (:mid, :name, :amount, :tag, :tid)"
-                    ),
-                    {
-                        "mid": month_id, "name": b["name"], "amount": float(b["amount"]),
-                        "tag": b["tag"], "tid": b["template_id"] if b["template_id"] == b["template_id"] else None,
-                    },
-                )
-        else:
-            templates = conn.query(
-                "SELECT id, name, default_amount, tag FROM bill_templates WHERE active = TRUE",
-                ttl=5,
-            )
-            for _, t in templates.iterrows():
-                s.execute(
-                    text(
-                        "INSERT INTO bill_entries (month_id, name, amount, tag, template_id) "
-                        "VALUES (:mid, :name, :amount, :tag, :tid)"
-                    ),
-                    {
-                        "mid": month_id, "name": t["name"], "amount": float(t["default_amount"]),
-                        "tag": t["tag"], "tid": int(t["id"]),
-                    },
-                )
         s.commit()
         st.cache_data.clear()
 
@@ -338,6 +361,21 @@ def update_bill_entry(entry_id: int, name: str, amount: float, tag: str):
             text("UPDATE bill_entries SET name = :name, amount = :amount, tag = :tag WHERE id = :id"),
             {"name": name, "amount": amount, "tag": tag, "id": entry_id},
         )
+        # If this bill traces back to a recurring template, keep the
+        # template in sync so future months pick up the change too -
+        # this is what lets editing a bill in Month Entry (e.g. the water
+        # bill going up) carry forward automatically.
+        template_row = s.execute(
+            text("SELECT template_id FROM bill_entries WHERE id = :id"), {"id": entry_id}
+        ).fetchone()
+        if template_row and template_row[0] is not None:
+            s.execute(
+                text(
+                    "UPDATE bill_templates SET name = :name, default_amount = :amount, tag = :tag "
+                    "WHERE id = :tid"
+                ),
+                {"name": name, "amount": amount, "tag": tag, "tid": template_row[0]},
+            )
         s.commit()
         st.cache_data.clear()
 

@@ -27,7 +27,57 @@ PERSONAL_COLOR = "#F2C14E"
 SAVINGS_COLOR = "#06A77D"
 GAUGE_BANDS = [(0, 50, "#D5573B"), (50, 80, "#F2C14E"), (80, 100, "#06A77D")]
 
+CAL_BG = "#D9EEDD"      # pastel green
+CAL_TEXT = "#2F5D45"
+DANI_BG = "#FBDCD3"     # pastel coral
+DANI_TEXT = "#8B4038"
+
 TAG_OPTIONS = ["Joint", "Cal", "Dani"]
+
+CUSTOM_CSS = """
+<style>
+/* Soften native bordered containers for a homely feel */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 18px !important;
+    border: 1px solid #EDE0CF !important;
+    box-shadow: 0 2px 10px rgba(139, 115, 85, 0.08);
+}
+
+/* Sidebar warmth */
+section[data-testid="stSidebar"] {
+    background-color: #FBEFE1;
+}
+
+/* Person-specific accent cards */
+.person-card {
+    border-radius: 18px;
+    padding: 20px 22px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+.cal-card { background-color: %(cal_bg)s; color: %(cal_text)s; }
+.dani-card { background-color: %(dani_bg)s; color: %(dani_text)s; }
+.person-card h4 { margin-top: 0; margin-bottom: 10px; }
+.person-card p { margin: 4px 0; font-size: 0.95rem; }
+.person-card .total-line { font-weight: 700; margin-top: 10px; font-size: 1.05rem; }
+</style>
+""" % {"cal_bg": CAL_BG, "cal_text": CAL_TEXT, "dani_bg": DANI_BG, "dani_text": DANI_TEXT}
+
+
+def inject_custom_css():
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def person_card_html(title: str, spending: float, bills: float, savings: float, total: float, css_class: str) -> str:
+    return f"""
+    <div class="person-card {css_class}">
+        <h4>{title}</h4>
+        <p>Spending - £{spending:,.2f}</p>
+        <p>Bills - £{bills:,.2f}</p>
+        <p>Savings - £{savings:,.2f}</p>
+        <p class="total-line">Total - £{total:,.2f}</p>
+    </div>
+    """
 
 
 # ---------- navigation helpers ----------
@@ -91,7 +141,7 @@ def build_pie_figure(result):
         marker=dict(colors=[s[2] for s in slices]),
         hovertemplate="%{label}: £%{value:,.2f}<extra></extra>",
     )])
-    fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=320)
+    fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=320, paper_bgcolor="rgba(0,0,0,0)")
     return fig
 
 
@@ -110,7 +160,7 @@ def build_gauge_figure(result):
             "steps": [{"range": [s, e], "color": c} for s, e, c in GAUGE_BANDS],
         },
     ))
-    fig.update_layout(margin=dict(l=20, r=20, t=50, b=10), height=280)
+    fig.update_layout(margin=dict(l=20, r=20, t=50, b=10), height=280, paper_bgcolor="rgba(0,0,0,0)")
     return fig
 
 
@@ -129,7 +179,7 @@ def build_trend_figure(confirmed_months):
     fig.update_layout(
         barmode="stack", yaxis_title="£",
         margin=dict(l=40, r=10, t=10, b=40), height=320,
-        legend=dict(orientation="h", y=1.1),
+        legend=dict(orientation="h", y=1.1), paper_bgcolor="rgba(0,0,0,0)",
     )
     return fig
 
@@ -183,8 +233,6 @@ def parse_month_string(value: str):
 
 
 def money_delta(current, previous):
-    """Formats a delta string for st.metric, or None if there's no prior
-    month to compare against."""
     if previous is None:
         return None
     diff = current - previous
@@ -193,10 +241,28 @@ def money_delta(current, previous):
     return f"£{diff:,.2f}"
 
 
+def render_add_month_section():
+    with st.container(border=True):
+        st.subheader("+ Add New Month")
+        suggested = datetime.date.today().strftime("%B %Y")
+        month_text = st.text_input("Month and year", value=suggested, key="new_month_text")
+        if st.button("Add / Open Month"):
+            parsed = parse_month_string(month_text)
+            if not parsed:
+                st.error("Please enter it like 'September 2026' or 'Sep 2026'.")
+            else:
+                year, month = parsed
+                month_id = db.get_or_create_month(year, month)
+                st.session_state.pop("loaded_month_id", None)
+                go_to("month_entry", month_id=month_id)
+
+
 # ---------- Dashboard ----------
 
 def render_dashboard():
     st.title("💰 Household Budget")
+
+    render_add_month_section()
 
     all_months = db.get_all_months()
     confirmed_sorted = sorted(
@@ -212,7 +278,7 @@ def render_dashboard():
     # ---------- Overview ----------
     with tab_overview:
         if latest is None:
-            st.info("No confirmed months yet - add one from the History tab.")
+            st.info("No confirmed months yet - add one above.")
         else:
             result, fin = calculate_month(latest["id"])
             prev_result, _ = calculate_month(previous["id"]) if previous else (None, None)
@@ -281,19 +347,21 @@ def render_dashboard():
 
             col_cal, col_dani = st.columns(2)
             with col_cal:
-                with st.container(border=True):
-                    st.markdown("**To Cal**")
-                    st.write(f"Spending - £{result.allowance_per_person:,.2f}")
-                    st.write(f"Bills - £{fin['cal_bills']:,.2f}")
-                    st.write(f"Savings - £{result.cal_individual_savings:,.2f}")
-                    st.markdown(f"**Total - £{cal_total:,.2f}**")
+                st.markdown(
+                    person_card_html(
+                        "To Cal", result.allowance_per_person, fin["cal_bills"],
+                        result.cal_individual_savings, cal_total, "cal-card",
+                    ),
+                    unsafe_allow_html=True,
+                )
             with col_dani:
-                with st.container(border=True):
-                    st.markdown("**To Dani**")
-                    st.write(f"Spending - £{result.allowance_per_person:,.2f}")
-                    st.write(f"Bills - £{fin['dani_bills']:,.2f}")
-                    st.write(f"Savings - £{result.dani_individual_savings:,.2f}")
-                    st.markdown(f"**Total - £{dani_total:,.2f}**")
+                st.markdown(
+                    person_card_html(
+                        "To Dani", result.allowance_per_person, fin["dani_bills"],
+                        result.dani_individual_savings, dani_total, "dani-card",
+                    ),
+                    unsafe_allow_html=True,
+                )
 
             st.caption(
                 "Bills tagged 'Joint' aren't listed here - they're paid directly from "
@@ -312,21 +380,6 @@ def render_dashboard():
 
     # ---------- History ----------
     with tab_history:
-        with st.container(border=True):
-            st.subheader("+ Add New Month")
-            suggested = datetime.date.today().strftime("%B %Y")
-            month_text = st.text_input("Month and year", value=suggested, key="new_month_text")
-            if st.button("Add / Open Month"):
-                parsed = parse_month_string(month_text)
-                if not parsed:
-                    st.error("Please enter it like 'September 2026' or 'Sep 2026'.")
-                else:
-                    year, month = parsed
-                    month_id = db.get_or_create_month(year, month)
-                    st.session_state.pop("loaded_month_id", None)
-                    go_to("month_entry", month_id=month_id)
-
-        st.write("")
         if st.button("⬇ Prepare CSV export"):
             st.session_state.csv_export_bytes = build_csv_bytes()
         if "csv_export_bytes" in st.session_state:
@@ -418,20 +471,29 @@ def render_month_entry():
             )
             st.rerun()
 
-    col_income, col_easy = st.columns(2)
-    with col_income:
+        st.caption(
+            "One-off items here don't carry forward to next month. To add or change "
+            "a *recurring* bill (so it keeps appearing automatically), use Settings → "
+            "Recurring bills."
+        )
+
+    col_cal, col_dani = st.columns(2)
+    with col_cal:
         with st.container(border=True):
-            st.subheader("Income this month")
-            st.number_input("Cal - Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
-            st.number_input("Cal - RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
-            st.number_input("Dani - Income (£)", step=1.0, format="%.2f", key="dani_income_input")
-    with col_easy:
+            st.markdown(f"<h4 style='color:{CAL_TEXT};'>🟢 Cal's income</h4>", unsafe_allow_html=True)
+            st.number_input("Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
+            st.number_input("RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
+    with col_dani:
         with st.container(border=True):
-            st.subheader("Easy-access savings pot")
-            st.number_input(
-                "Current easy-access balance (£)", step=1.0, format="%.2f", key="easy_access_input",
-                help="Used to work out how much of this month's leftover tops the pot up to target.",
-            )
+            st.markdown(f"<h4 style='color:{DANI_TEXT};'>🩷 Dani's income</h4>", unsafe_allow_html=True)
+            st.number_input("Income (£)", step=1.0, format="%.2f", key="dani_income_input")
+
+    with st.container(border=True):
+        st.subheader("Easy-access savings pot")
+        st.number_input(
+            "Current easy-access balance (£)", step=1.0, format="%.2f", key="easy_access_input",
+            help="Used to work out how much of this month's leftover tops the pot up to target.",
+        )
 
     def save_all_fields():
         for row in st.session_state.bill_rows:
@@ -455,7 +517,7 @@ def render_month_entry():
     with col1:
         if st.button("Confirm inputs"):
             save_all_fields()
-            st.session_state.pop("loaded_month_id", None)  # force reload so new bills get real ids
+            st.session_state.pop("loaded_month_id", None)
             st.toast("Bills and incomes have been saved.", icon="✅")
             st.rerun()
     with col2:
@@ -510,6 +572,7 @@ def render_settings():
 
     settings = db.get_settings()
     with st.container(border=True):
+        st.subheader("Waterfall settings")
         allowance = st.number_input(
             "Personal allowance per person (£)", value=float(settings["allowance_per_person"]),
             step=1.0, format="%.2f",
@@ -533,7 +596,74 @@ def render_settings():
             db.set_setting("savings_rate", rate_pct / 100)
             db.set_setting("easy_access_target", target)
             st.toast("Settings updated.", icon="✅")
-            go_to("dashboard")
+            st.rerun()
+
+    st.write("")
+    render_recurring_bills_section()
+
+
+def render_recurring_bills_section():
+    with st.container(border=True):
+        st.subheader("Recurring bills")
+        st.caption(
+            "This is the master list new months are built from. Update an amount here "
+            "the moment it changes (e.g. the water bill going up) rather than waiting "
+            "for next month - it'll carry forward from here on."
+        )
+
+        if st.session_state.get("template_rows_loaded") != True:
+            templates = db.get_active_bill_templates()
+            for t in templates:
+                t["local_id"] = str(uuid.uuid4())
+            st.session_state.template_rows = templates
+            st.session_state.template_rows_loaded = True
+
+        for row in list(st.session_state.template_rows):
+            lid = row["local_id"]
+            c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
+            c1.text_input("Name", value=row["name"], key=f"tmpl_name_{lid}", label_visibility="collapsed")
+            c2.number_input(
+                "Amount", value=float(row["default_amount"]), step=1.0, format="%.2f",
+                key=f"tmpl_amount_{lid}", label_visibility="collapsed",
+            )
+            c3.selectbox(
+                "Tag", TAG_OPTIONS, index=TAG_OPTIONS.index(row["tag"]),
+                key=f"tmpl_tag_{lid}", label_visibility="collapsed",
+            )
+            if c4.button("✕", key=f"tmpl_remove_{lid}"):
+                if row.get("id"):
+                    db.deactivate_bill_template(row["id"])
+                st.session_state.template_rows = [
+                    r for r in st.session_state.template_rows if r["local_id"] != lid
+                ]
+                st.rerun()
+
+        if st.button("+ Add recurring bill"):
+            st.session_state.template_rows.append(
+                {"id": None, "name": "", "default_amount": 0.0, "tag": "Joint", "local_id": str(uuid.uuid4())}
+            )
+            st.rerun()
+
+        if st.button("Save recurring bills", type="primary"):
+            for row in st.session_state.template_rows:
+                lid = row["local_id"]
+                name = st.session_state[f"tmpl_name_{lid}"]
+                amount = st.session_state[f"tmpl_amount_{lid}"]
+                tag = st.session_state[f"tmpl_tag_{lid}"]
+                if not name.strip():
+                    continue
+                if row.get("id"):
+                    db.update_bill_template(row["id"], name, amount, tag)
+                else:
+                    db.add_bill_template(name, amount, tag)
+            st.session_state.template_rows_loaded = False
+            st.toast("Recurring bills updated.", icon="✅")
+            st.rerun()
+
+        st.caption(
+            "Removing a bill here only stops it appearing in *future* new months - "
+            "it won't touch any month you've already created."
+        )
 
 
 # ---------- password gate ----------
@@ -558,6 +688,8 @@ def check_password() -> bool:
 # ---------- main ----------
 
 def main():
+    inject_custom_css()
+
     if not check_password():
         st.stop()
 
