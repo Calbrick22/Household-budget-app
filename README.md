@@ -72,6 +72,16 @@ checking your Neon project's region is reasonably close to where you are.
 
 ## What's new in this redesign
 
+### Custom logo (v6)
+Replaced the generated "HB" monogram with a custom-designed logo:
+- `assets/logo_full.png` - the complete illustration (house, Dani & Cal
+  holding hands, £ growth icon, "Dani & Cal / Household Budget" text) -
+  used large on the login page, where there's room for it to shine.
+- `assets/logo_icon.png` - a cropped, icon-only version (just the
+  illustration, no text, since the text isn't legible at small sizes) -
+  used as the favicon and everywhere else it appears small (sidebar,
+  page headers).
+
 ### Logo & avatars (v5)
 - A real logo mark (`assets/logo.png`) - a rounded-square badge split
   diagonally green/coral with an "HB" monogram, generated with Pillow.

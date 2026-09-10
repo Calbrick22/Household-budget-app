@@ -19,7 +19,7 @@ import streamlit as st
 import db
 from calculations import calculate_waterfall
 
-st.set_page_config(page_title="Household Budget", page_icon="assets/logo.png", layout="wide")
+st.set_page_config(page_title="Household Budget", page_icon="assets/logo_icon.png", layout="wide")
 
 EASY_ACCESS_COLOR = "#06A77D"
 LONG_TERM_COLOR = "#D5573B"
@@ -242,13 +242,15 @@ from pathlib import Path
 
 
 @st.cache_data
-def _get_logo_base64() -> str:
-    logo_path = Path(__file__).parent / "assets" / "logo.png"
+def _get_logo_base64(variant: str = "icon") -> str:
+    filename = "logo_icon.png" if variant == "icon" else "logo_full.png"
+    logo_path = Path(__file__).parent / "assets" / filename
     return base64.b64encode(logo_path.read_bytes()).decode()
 
 
-def logo_img_html(size: int = 40) -> str:
-    return f'<img src="data:image/png;base64,{_get_logo_base64()}" width="{size}" height="{size}" style="border-radius:{size * 0.22:.0f}px; vertical-align:middle;">'
+def logo_img_html(size: int = 40, variant: str = "icon") -> str:
+    b64 = _get_logo_base64(variant)
+    return f'<img src="data:image/png;base64,{b64}" width="{size}" style="vertical-align:middle;">'
 
 
 def avatar_html(letter: str, person: str, size: int = 30) -> str:
@@ -366,7 +368,7 @@ def render_sidebar():
     with st.sidebar:
         st.markdown(
             f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">'
-            f'{logo_img_html(34)}<span style="font-family:\'Poppins\',sans-serif; font-weight:700; font-size:1.15rem;">Household Budget</span>'
+            f'{logo_img_html(40)}<span style="font-family:\'Poppins\',sans-serif; font-weight:700; font-size:1.15rem;">Household Budget</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -560,7 +562,7 @@ def render_add_month_section():
 def render_dashboard():
     st.markdown(
         f'<div style="display:flex; align-items:center; gap:14px; margin-bottom:8px;">'
-        f'{logo_img_html(48)}<h1 style="margin:0;">Household Budget</h1></div>',
+        f'{logo_img_html(54)}<h1 style="margin:0;">Household Budget</h1></div>',
         unsafe_allow_html=True,
     )
 
@@ -815,7 +817,7 @@ def render_results():
 
     st.markdown(
         f'<div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">'
-        f'{logo_img_html(36)}<h1 style="margin:0;">{calendar.month_name[fin["month"]]} {fin["year"]} - Results</h1></div>',
+        f'{logo_img_html(42)}<h1 style="margin:0;">{calendar.month_name[fin["month"]]} {fin["year"]} - Results</h1></div>',
         unsafe_allow_html=True,
     )
 
@@ -976,8 +978,7 @@ def check_password() -> bool:
         with styled_container("card-login"):
             st.markdown(
                 f'<div style="text-align:center;">'
-                f'<div style="margin-bottom:8px;">{logo_img_html(56)}</div>'
-                '<h2 style="margin-top:4px;margin-bottom:2px;">Household Budget</h2>'
+                f'<div style="margin-bottom:10px;">{logo_img_html(200, variant="full")}</div>'
                 '<p style="opacity:0.7;margin-bottom:18px;">Enter the shared password to continue</p>'
                 '</div>',
                 unsafe_allow_html=True,
