@@ -72,6 +72,28 @@ checking your Neon project's region is reasonably close to where you are.
 
 ## What's new in this redesign
 
+### Logo & avatars (v5)
+- A real logo mark (`assets/logo.png`) - a rounded-square badge split
+  diagonally green/coral with an "HB" monogram, generated with Pillow.
+  Used as the actual browser favicon and inline throughout the app
+  (sidebar, dashboard header, login card, Results page), replacing the
+  💰 emoji everywhere.
+- **Avatar badges** - small circular "C" / "D" initials (green/coral,
+  matching each person's colour) next to Cal's and Dani's names on the
+  Transfers cards, Month Entry income headers, and the Results page,
+  replacing the plain emoji circles from before.
+- The Results page was also rebuilt to match the rest of the app's style
+  (icon chips, avatars) instead of being the last page of plain text.
+
+### Login & layout polish (v4)
+- The password screen is now a properly-sized, centered card instead of
+  a full-width text box stretching across the screen.
+- Main content is capped at a sensible max-width on large monitors,
+  instead of stretching edge-to-edge - looks more like a focused app,
+  less like a spreadsheet.
+- Empty states (no months yet, not enough data for a trend) now show a
+  small icon and centered message instead of a plain info box.
+
 ### Modernised look (v3)
 Inspired by modern fintech app design (banking/finance dashboard
 references) while keeping the pastel warmth from before:

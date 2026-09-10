@@ -19,7 +19,7 @@ import streamlit as st
 import db
 from calculations import calculate_waterfall
 
-st.set_page_config(page_title="Household Budget", page_icon="💰", layout="wide")
+st.set_page_config(page_title="Household Budget", page_icon="assets/logo.png", layout="wide")
 
 EASY_ACCESS_COLOR = "#06A77D"
 LONG_TERM_COLOR = "#D5573B"
@@ -52,6 +52,7 @@ CARD_PALETTE = {
     "card-trends": ("#DCEAFB", "#F3F8FF", "#4E80C4"),
     "card-history": ("#FBEBC8", "#FFFBF0", "#C9A23A"),
     "card-add-month": ("#E4F0DE", "#F5FAF2", "#5B9C6E"),
+    "card-login": ("#DCEEE9", "#F3FAF8", "#3E8F82"),
 }
 
 
@@ -86,6 +87,13 @@ html, body, [class*="css"], .stApp, p, span, div, label, li {{
 h1, h2, h3, h4, h5 {{
     font-family: 'Poppins', sans-serif !important;
     font-weight: 700 !important;
+}}
+
+/* Keep the main content a sensible width on large screens - full-bleed
+   edge-to-edge looks institutional, not app-like */
+div[data-testid="stMainBlockContainer"] {{
+    max-width: 1100px;
+    margin: 0 auto;
 }}
 
 /* Warm gradient backdrop for the whole app */
@@ -229,6 +237,31 @@ def icon_chip(emoji: str, bg_color: str) -> str:
     return f'<span class="icon-chip" style="background:{bg_color};">{emoji}</span>'
 
 
+import base64
+from pathlib import Path
+
+
+@st.cache_data
+def _get_logo_base64() -> str:
+    logo_path = Path(__file__).parent / "assets" / "logo.png"
+    return base64.b64encode(logo_path.read_bytes()).decode()
+
+
+def logo_img_html(size: int = 40) -> str:
+    return f'<img src="data:image/png;base64,{_get_logo_base64()}" width="{size}" height="{size}" style="border-radius:{size * 0.22:.0f}px; vertical-align:middle;">'
+
+
+def avatar_html(letter: str, person: str, size: int = 30) -> str:
+    bg = "#3F8F5F" if person == "Cal" else "#C1543A"
+    font_size = int(size * 0.46)
+    return _flatten_html(f"""
+    <span style="display:inline-flex; align-items:center; justify-content:center;
+        width:{size}px; height:{size}px; border-radius:50%; background:{bg};
+        color:white; font-family:'Poppins',sans-serif; font-weight:700;
+        font-size:{font_size}px; margin-right:10px; flex-shrink:0;">{letter}</span>
+    """)
+
+
 def _flatten_html(html: str) -> str:
     """Collapses a multi-line HTML template to one line. Streamlit's
     markdown-to-HTML pipeline can misparse HTML blocks that span multiple
@@ -297,13 +330,23 @@ def hero_card_html(month_label: str, result, prev_result) -> str:
     """)
 
 
-def person_card_html(title: str, spending: float, bills: float, savings: float, total: float, css_class: str) -> str:
+def empty_state_html(icon: str, message: str) -> str:
+    return _flatten_html(f"""
+    <div style="text-align:center; padding: 32px 16px; opacity: 0.75;">
+        <div style="font-size: 2rem; margin-bottom: 8px;">{icon}</div>
+        <div>{message}</div>
+    </div>
+    """)
+
+
+def person_card_html(title: str, person: str, spending: float, bills: float, savings: float, total: float, css_class: str) -> str:
     rows = stat_row_html("💸", PERSONAL_COLOR, "Spending", f"£{spending:,.2f}")
     rows += stat_row_html("🧾", BILLS_COLOR, "Bills", f"£{bills:,.2f}")
     rows += stat_row_html("💰", SAVINGS_COLOR, "Savings", f"£{savings:,.2f}")
+    initial = person[0]
     return _flatten_html(f"""
     <div class="person-card {css_class}">
-        <h4>{title}</h4>
+        <h4 style="display:flex; align-items:center;">{avatar_html(initial, person, 32)}{title}</h4>
         {rows}
         <p class="total-line">Total - £{total:,.2f}</p>
     </div>
@@ -321,7 +364,12 @@ def go_to(view: str, month_id: int = None):
 
 def render_sidebar():
     with st.sidebar:
-        st.markdown("## 💰 Household Budget")
+        st.markdown(
+            f'<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">'
+            f'{logo_img_html(34)}<span style="font-family:\'Poppins\',sans-serif; font-weight:700; font-size:1.15rem;">Household Budget</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         dashboard_active = st.session_state.view == "dashboard"
         settings_active = st.session_state.view == "settings"
         if st.button(
@@ -510,7 +558,11 @@ def render_add_month_section():
 # ---------- Dashboard ----------
 
 def render_dashboard():
-    st.title("💰 Household Budget")
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:14px; margin-bottom:8px;">'
+        f'{logo_img_html(48)}<h1 style="margin:0;">Household Budget</h1></div>',
+        unsafe_allow_html=True,
+    )
 
     render_add_month_section()
 
@@ -528,7 +580,7 @@ def render_dashboard():
     # ---------- Overview ----------
     with tab_overview:
         if latest is None:
-            st.info("No confirmed months yet - add one above.")
+            st.markdown(empty_state_html("🌱", "No confirmed months yet - add one above."), unsafe_allow_html=True)
         else:
             result, fin = calculate_month(latest["id"])
             prev_result, _ = calculate_month(previous["id"]) if previous else (None, None)
@@ -555,7 +607,7 @@ def render_dashboard():
     # ---------- Transfers ----------
     with tab_transfers:
         if latest is None:
-            st.info("No confirmed months yet.")
+            st.markdown(empty_state_html("🌱", "No confirmed months yet."), unsafe_allow_html=True)
         else:
             result, fin = calculate_month(latest["id"])
             st.caption(
@@ -569,7 +621,7 @@ def render_dashboard():
             with col_cal:
                 st.markdown(
                     person_card_html(
-                        "To Cal", result.allowance_per_person, fin["cal_bills"],
+                        "To Cal", "Cal", result.allowance_per_person, fin["cal_bills"],
                         result.cal_individual_savings, cal_total, "cal-card",
                     ),
                     unsafe_allow_html=True,
@@ -577,7 +629,7 @@ def render_dashboard():
             with col_dani:
                 st.markdown(
                     person_card_html(
-                        "To Dani", result.allowance_per_person, fin["dani_bills"],
+                        "To Dani", "Dani", result.allowance_per_person, fin["dani_bills"],
                         result.dani_individual_savings, dani_total, "dani-card",
                     ),
                     unsafe_allow_html=True,
@@ -596,7 +648,7 @@ def render_dashboard():
                 st.subheader("Joint savings trend (last 6 months)")
                 st.plotly_chart(build_trend_figure(recent), width="stretch")
         else:
-            st.caption("Not enough confirmed months yet to show a trend.")
+            st.markdown(empty_state_html("📈", "Not enough confirmed months yet to show a trend."), unsafe_allow_html=True)
 
     # ---------- History ----------
     with tab_history:
@@ -611,7 +663,7 @@ def render_dashboard():
         st.write("")
         st.subheader("Past months")
         if not all_months:
-            st.caption("No months yet.")
+            st.markdown(empty_state_html("🗓️", "No months yet."), unsafe_allow_html=True)
         for m in all_months:
             label = f"{calendar.month_name[m['month']]} {m['year']}"
             if m["confirmed"]:
@@ -703,12 +755,18 @@ def render_month_entry():
     col_cal, col_dani = st.columns(2)
     with col_cal:
         with styled_container("card-cal-income"):
-            st.markdown(f"<h4 style='color:{CAL_TEXT};'>🟢 Cal's income</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<h4 style='color:{CAL_TEXT}; display:flex; align-items:center;'>{avatar_html('C', 'Cal', 30)}Cal's income</h4>",
+                unsafe_allow_html=True,
+            )
             st.number_input("Salary (£)", step=1.0, format="%.2f", key="cal_salary_input")
             st.number_input("RAF (£)", step=1.0, format="%.2f", key="cal_raf_input")
     with col_dani:
         with styled_container("card-dani-income"):
-            st.markdown(f"<h4 style='color:{DANI_TEXT};'>🩷 Dani's income</h4>", unsafe_allow_html=True)
+            st.markdown(
+                f"<h4 style='color:{DANI_TEXT}; display:flex; align-items:center;'>{avatar_html('D', 'Dani', 30)}Dani's income</h4>",
+                unsafe_allow_html=True,
+            )
             st.number_input("Income (£)", step=1.0, format="%.2f", key="dani_income_input")
 
     with styled_container("card-easy"):
@@ -755,20 +813,34 @@ def render_results():
     month_id = st.session_state.month_id
     result, fin = calculate_month(month_id)
 
-    st.title(f"{calendar.month_name[fin['month']]} {fin['year']} - Results")
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">'
+        f'{logo_img_html(36)}<h1 style="margin:0;">{calendar.month_name[fin["month"]]} {fin["year"]} - Results</h1></div>',
+        unsafe_allow_html=True,
+    )
 
     with styled_container("card-overview"):
-        st.write(f"Cal income: £{result.cal_income:,.2f}")
-        st.write(f"Dani income: £{result.dani_income:,.2f}")
-        st.write(f"**Total income: £{result.total_income:,.2f}**")
-        st.write(f"Bills & expenses: -£{result.bills_total:,.2f}")
-        st.write(f"Allowances (£{result.allowance_per_person:,.2f} x 2): -£{result.allowance_total:,.2f}")
-        st.write(f"Cal's individual savings ({result.savings_rate:.0%}): -£{result.cal_individual_savings:,.2f}")
-        st.write(f"Dani's individual savings ({result.savings_rate:.0%}): -£{result.dani_individual_savings:,.2f}")
-        st.write(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
+        income_rows = _flatten_html(f"""
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Cal income</span></div><span class="stat-row-value">£{result.cal_income:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Dani income</span></div><span class="stat-row-value">£{result.dani_income:,.2f}</span></div>
+        """)
+        st.markdown(income_rows, unsafe_allow_html=True)
+        st.markdown(f"**Total income: £{result.total_income:,.2f}**")
         st.divider()
-        st.write(f"To easy-access pot: £{result.to_easy_access:,.2f}")
-        st.write(f"To long-term pot: £{result.to_long_term:,.2f}")
+        st.markdown(stat_row_html("🧾", BILLS_COLOR, "Bills & expenses", f"-£{result.bills_total:,.2f}"), unsafe_allow_html=True)
+        st.markdown(
+            stat_row_html("💸", PERSONAL_COLOR, f"Allowances (£{result.allowance_per_person:,.2f} x 2)", f"-£{result.allowance_total:,.2f}"),
+            unsafe_allow_html=True,
+        )
+        savings_rows = _flatten_html(f"""
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Individual savings ({result.savings_rate:.0%})</span></div><span class="stat-row-value">-£{result.cal_individual_savings:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Individual savings ({result.savings_rate:.0%})</span></div><span class="stat-row-value">-£{result.dani_individual_savings:,.2f}</span></div>
+        """)
+        st.markdown(savings_rows, unsafe_allow_html=True)
+        st.divider()
+        st.markdown(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
+        st.markdown(stat_row_html("🟢", EASY_ACCESS_COLOR, "To easy-access pot", f"£{result.to_easy_access:,.2f}"), unsafe_allow_html=True)
+        st.markdown(stat_row_html("📈", LONG_TERM_COLOR, "To long-term pot", f"£{result.to_long_term:,.2f}"), unsafe_allow_html=True)
 
     if result.is_shortfall:
         st.error(
@@ -898,14 +970,32 @@ def check_password() -> bool:
     if st.session_state.get("password_correct", False):
         return True
 
-    st.title("💰 Household Budget")
-    entered = st.text_input("Password", type="password", key="password_input")
-    if entered:
-        if entered == st.secrets.get("app_password"):
-            st.session_state.password_correct = True
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
+    st.markdown('<div style="height: 8vh;"></div>', unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.1, 1])
+    with col2:
+        with styled_container("card-login"):
+            st.markdown(
+                f'<div style="text-align:center;">'
+                f'<div style="margin-bottom:8px;">{logo_img_html(56)}</div>'
+                '<h2 style="margin-top:4px;margin-bottom:2px;">Household Budget</h2>'
+                '<p style="opacity:0.7;margin-bottom:18px;">Enter the shared password to continue</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            with st.form("login_form"):
+                entered = st.text_input(
+                    "Password", type="password", placeholder="Password",
+                    label_visibility="collapsed",
+                )
+                submitted = st.form_submit_button(
+                    "Unlock", type="primary", width="stretch"
+                )
+            if submitted:
+                if entered == st.secrets.get("app_password"):
+                    st.session_state.password_correct = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
     return False
 
 
