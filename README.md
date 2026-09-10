@@ -72,6 +72,33 @@ checking your Neon project's region is reasonably close to where you are.
 
 ## What's new in this redesign
 
+### Modernised look (v3)
+Inspired by modern fintech app design (banking/finance dashboard
+references) while keeping the pastel warmth from before:
+- **Inter + Poppins** fonts loaded from Google Fonts - Inter for body
+  text, Poppins (bold, rounded) for headings and the big hero number.
+- **A "hero card"** at the top of the Overview tab - a big bold total
+  income figure with a delta pill, and icon-chip rows underneath for
+  Bills, Allowances, Individual savings, and To joint savings.
+- **Colored icon chips** (small circular badges) next to every line item
+  in the hero card and the Transfers cards, colour-matched to the pie
+  chart legend for consistency.
+- **A progress ring** replaces the old speedometer-style gauge for
+  easy-access savings progress - a cleaner, more modern donut style.
+- **Rounded pill-style tabs** (Overview/Transfers/Trends/History) instead
+  of underlined text tabs, with the active tab filled solid.
+- **Sidebar nav shows the active page** as a filled pill, using
+  Streamlit's native button styling rather than CSS guesswork.
+- **Status badges** (Confirmed/Draft) on past months as small coloured
+  pills instead of plain emoji+text.
+- Every card now has a solid accent-coloured left border for a sharper,
+  more defined look than the softer all-gradient version before.
+- As with the color fix in v2, every page in this version was rendered
+  in a real headless browser and screenshotted to confirm it actually
+  looks right - including catching and fixing a real bug where the
+  Transfers cards' "Total" line was rendering as literal HTML text
+  instead of styled content.
+
 **Look & feel:**
 - A custom colour theme (`.streamlit/config.toml`) using the same teal/
   coral/yellow palette as the charts, instead of Streamlit's defaults.
