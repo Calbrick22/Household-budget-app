@@ -406,6 +406,7 @@ def calculate_month(month_id: int):
     result = calculate_waterfall(
         fin["cal_income"], fin["dani_income"], fin["bills_total"], allowance,
         savings_rate, target, fin["current_easy_access_balance"],
+        cal_personal_bills=fin["cal_bills"], dani_personal_bills=fin["dani_bills"],
     )
     return result, fin
 
@@ -480,6 +481,137 @@ def build_trend_figure(confirmed_months):
         barmode="stack", yaxis_title="£",
         margin=dict(l=40, r=10, t=10, b=40), height=320,
         legend=dict(orientation="h", y=1.1), paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
+def build_sankey_figure(result):
+    """Money-flow diagram for a single month: income splits into bills,
+    allowances, and savings, and savings splits further into the two
+    pots - a direct visual of the waterfall model the whole app is built
+    around."""
+    joint_savings = result.to_easy_access + result.to_long_term
+
+    labels = [
+        "Cal income", "Dani income", "Total income",
+        "Bills", "Allowances", "Individual savings", "Joint savings",
+        "Easy-access", "Long-term",
+    ]
+    node_colors = [
+        "#CDEDD6", "#FBD2C4", "#E7E1D6",
+        "#C7D6EA", "#FBE8B9", "#C8ECDD", "#F7D9CF",
+        "#C3ECDF", "#F3C8BC",
+    ]
+    link_source_colors = [
+        "#3F8F5F", "#C1543A", BILLS_COLOR, PERSONAL_COLOR,
+        SAVINGS_COLOR, LONG_TERM_COLOR, EASY_ACCESS_COLOR, "#B3492F",
+    ]
+    idx = {name: i for i, name in enumerate(labels)}
+
+    def rgba(hex_color, alpha=0.45):
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    links = [
+        (idx["Cal income"], idx["Total income"], result.cal_income, link_source_colors[0]),
+        (idx["Dani income"], idx["Total income"], result.dani_income, link_source_colors[1]),
+        (idx["Total income"], idx["Bills"], result.bills_total, BILLS_COLOR),
+        (idx["Total income"], idx["Allowances"], result.allowance_total, PERSONAL_COLOR),
+        (idx["Total income"], idx["Individual savings"], result.individual_savings_total, SAVINGS_COLOR),
+        (idx["Total income"], idx["Joint savings"], max(joint_savings, 0), LONG_TERM_COLOR),
+        (idx["Joint savings"], idx["Easy-access"], result.to_easy_access, EASY_ACCESS_COLOR),
+        (idx["Joint savings"], idx["Long-term"], result.to_long_term, "#B3492F"),
+    ]
+    links = [l for l in links if l[2] > 0]
+
+    fig = go.Figure(data=[go.Sankey(
+        node=dict(
+            label=labels, color=node_colors, pad=18, thickness=18,
+            line=dict(color="white", width=1),
+        ),
+        link=dict(
+            source=[l[0] for l in links], target=[l[1] for l in links],
+            value=[l[2] for l in links], color=[rgba(l[3]) for l in links],
+            hovertemplate="£%{value:,.2f}<extra></extra>",
+        ),
+    )])
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=10, b=10), height=380,
+        paper_bgcolor="rgba(0,0,0,0)", font=dict(size=13),
+    )
+    return fig
+
+
+def build_savings_rate_figure(confirmed_months):
+    """Two lines: the fixed individual savings rate, and the total rate
+    once the joint leftover is included - shows how much more you're
+    actually saving beyond the mandated percentage."""
+    labels, individual_rate, total_rate = [], [], []
+    for m in confirmed_months:
+        result, _ = calculate_month(m["id"])
+        labels.append(f"{calendar.month_abbr[m['month']]} {m['year']}")
+        if result.total_income > 0:
+            individual_rate.append(result.individual_savings_total / result.total_income * 100)
+            total_saved = result.individual_savings_total + result.to_easy_access + result.to_long_term
+            total_rate.append(total_saved / result.total_income * 100)
+        else:
+            individual_rate.append(0)
+            total_rate.append(0)
+
+    fig = go.Figure(data=[
+        go.Scatter(
+            x=labels, y=total_rate, name="Total savings rate", mode="lines+markers",
+            line=dict(color=EASY_ACCESS_COLOR, width=3), fill="tozeroy",
+            fillcolor="rgba(6,167,125,0.12)", marker=dict(size=7),
+        ),
+        go.Scatter(
+            x=labels, y=individual_rate, name="Individual savings rate (fixed %)",
+            mode="lines+markers", line=dict(color="#8E6FB5", width=2, dash="dot"),
+            marker=dict(size=6),
+        ),
+    ])
+    fig.update_layout(
+        yaxis_title="% of income", yaxis_ticksuffix="%",
+        margin=dict(l=40, r=10, t=10, b=40), height=320,
+        legend=dict(orientation="h", y=1.15), paper_bgcolor="rgba(0,0,0,0)",
+        hovermode="x unified",
+    )
+    return fig
+
+
+def build_bills_by_tag_figure(confirmed_months):
+    """100%-stacked area showing each month's bill total as a share
+    between Joint / Cal / Dani - makes a shift in who's covering what
+    (e.g. as Dani's income grows) visible at a glance."""
+    labels, joint_vals, cal_vals, dani_vals = [], [], [], []
+    for m in confirmed_months:
+        _, fin = calculate_month(m["id"])
+        labels.append(f"{calendar.month_abbr[m['month']]} {m['year']}")
+        joint_vals.append(max(fin["bills_total"] - fin["cal_bills"] - fin["dani_bills"], 0))
+        cal_vals.append(fin["cal_bills"])
+        dani_vals.append(fin["dani_bills"])
+
+    fig = go.Figure(data=[
+        go.Scatter(
+            x=labels, y=joint_vals, name="Joint", mode="lines", stackgroup="one",
+            groupnorm="percent", line=dict(width=0.5, color="#7A7168"),
+            fillcolor="rgba(122,113,104,0.55)",
+        ),
+        go.Scatter(
+            x=labels, y=cal_vals, name="Cal", mode="lines", stackgroup="one",
+            line=dict(width=0.5, color="#3F8F5F"), fillcolor="rgba(63,143,95,0.55)",
+        ),
+        go.Scatter(
+            x=labels, y=dani_vals, name="Dani", mode="lines", stackgroup="one",
+            line=dict(width=0.5, color="#C1543A"), fillcolor="rgba(193,84,58,0.55)",
+        ),
+    ])
+    fig.update_layout(
+        yaxis_title="Share of bills", yaxis_ticksuffix="%",
+        margin=dict(l=40, r=10, t=10, b=40), height=320,
+        legend=dict(orientation="h", y=1.15), paper_bgcolor="rgba(0,0,0,0)",
+        hovermode="x unified",
     )
     return fig
 
@@ -645,12 +777,28 @@ def render_dashboard():
     # ---------- Trends ----------
     with tab_trends:
         recent = confirmed_sorted[-6:]
-        if recent:
+        if not recent:
+            st.markdown(empty_state_html("📈", "Not enough confirmed months yet to show a trend."), unsafe_allow_html=True)
+        else:
+            latest_result, _ = calculate_month(latest["id"])
+            with styled_container("card-trends"):
+                st.subheader("🌊 Where this month's money flows")
+                st.caption(f"{calendar.month_name[latest['month']]} {latest['year']} - hover any flow for the exact amount")
+                st.plotly_chart(build_sankey_figure(latest_result), width="stretch")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                with styled_container("card-trends"):
+                    st.subheader("Savings rate over time")
+                    st.plotly_chart(build_savings_rate_figure(recent), width="stretch")
+            with col_b:
+                with styled_container("card-trends"):
+                    st.subheader("Who's covering the bills")
+                    st.plotly_chart(build_bills_by_tag_figure(recent), width="stretch")
+
             with styled_container("card-trends"):
                 st.subheader("Joint savings trend (last 6 months)")
                 st.plotly_chart(build_trend_figure(recent), width="stretch")
-        else:
-            st.markdown(empty_state_html("📈", "Not enough confirmed months yet to show a trend."), unsafe_allow_html=True)
 
     # ---------- History ----------
     with tab_history:
@@ -835,10 +983,14 @@ def render_results():
             unsafe_allow_html=True,
         )
         savings_rows = _flatten_html(f"""
-        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Individual savings ({result.savings_rate:.0%})</span></div><span class="stat-row-value">-£{result.cal_individual_savings:,.2f}</span></div>
-        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Individual savings ({result.savings_rate:.0%})</span></div><span class="stat-row-value">-£{result.dani_individual_savings:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Individual savings ({result.savings_rate:.0%} of £{result.cal_savings_base:,.2f})</span></div><span class="stat-row-value">-£{result.cal_individual_savings:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Individual savings ({result.savings_rate:.0%} of £{result.dani_savings_base:,.2f})</span></div><span class="stat-row-value">-£{result.dani_individual_savings:,.2f}</span></div>
         """)
         st.markdown(savings_rows, unsafe_allow_html=True)
+        st.caption(
+            "Savings base = income minus that person's own Cal/Dani-tagged bills, "
+            "so one person's personal bills no longer reduce the other's savings."
+        )
         st.divider()
         st.markdown(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
         st.markdown(stat_row_html("🟢", EASY_ACCESS_COLOR, "To easy-access pot", f"£{result.to_easy_access:,.2f}"), unsafe_allow_html=True)

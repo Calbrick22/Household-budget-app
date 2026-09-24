@@ -16,6 +16,11 @@ class WaterfallResult:
 
     bills_total: float
 
+    cal_personal_bills: float
+    dani_personal_bills: float
+    cal_savings_base: float
+    dani_savings_base: float
+
     allowance_per_person: float
     allowance_total: float
 
@@ -41,11 +46,24 @@ def calculate_waterfall(
     savings_rate: float,
     easy_access_target: float,
     current_easy_access_balance: float,
+    cal_personal_bills: float = 0.0,
+    dani_personal_bills: float = 0.0,
 ) -> WaterfallResult:
     """Run the full monthly waterfall and return every intermediate figure.
 
     All monetary inputs are plain floats (GBP). savings_rate is a fraction
     (0.15 for 15%), never a whole number.
+
+    cal_personal_bills / dani_personal_bills are each person's own
+    Cal-tagged / Dani-tagged bills (a subset of bills_total, which still
+    includes Joint-tagged bills too). Individual savings is calculated on
+    each person's income *after* their own personal bills are deducted, so
+    someone with larger personal bills (e.g. CMS, a repayment) doesn't have
+    their savings base propped up by money that's already spoken for. This
+    doesn't change how much money the household has overall - the joint
+    pot still ends up with the exact same total either way - it just makes
+    sure one person's personal bills aren't quietly reducing the other
+    person's fair share of individual savings.
     """
     if savings_rate < 0 or savings_rate > 1:
         raise ValueError("savings_rate must be between 0 and 1 (e.g. 0.15 for 15%)")
@@ -56,6 +74,8 @@ def calculate_waterfall(
         ("allowance_per_person", allowance_per_person),
         ("easy_access_target", easy_access_target),
         ("current_easy_access_balance", current_easy_access_balance),
+        ("cal_personal_bills", cal_personal_bills),
+        ("dani_personal_bills", dani_personal_bills),
     ):
         if value < 0:
             raise ValueError(f"{name} cannot be negative")
@@ -63,8 +83,14 @@ def calculate_waterfall(
     total_income = cal_income + dani_income
     allowance_total = allowance_per_person * 2
 
-    cal_individual_savings = round(cal_income * savings_rate, 2)
-    dani_individual_savings = round(dani_income * savings_rate, 2)
+    # Savings base = income net of that person's own personal bills, floored
+    # at 0 so someone whose personal bills exceed their income never gets a
+    # negative savings figure.
+    cal_savings_base = max(0.0, cal_income - cal_personal_bills)
+    dani_savings_base = max(0.0, dani_income - dani_personal_bills)
+
+    cal_individual_savings = round(cal_savings_base * savings_rate, 2)
+    dani_individual_savings = round(dani_savings_base * savings_rate, 2)
     individual_savings_total = cal_individual_savings + dani_individual_savings
 
     remainder = round(
@@ -85,6 +111,10 @@ def calculate_waterfall(
         dani_income=dani_income,
         total_income=total_income,
         bills_total=bills_total,
+        cal_personal_bills=cal_personal_bills,
+        dani_personal_bills=dani_personal_bills,
+        cal_savings_base=cal_savings_base,
+        dani_savings_base=dani_savings_base,
         allowance_per_person=allowance_per_person,
         allowance_total=allowance_total,
         savings_rate=savings_rate,
