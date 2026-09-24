@@ -308,11 +308,11 @@ def hero_card_html(month_label: str, result, prev_result) -> str:
         delta_pill_html(money_delta(result.allowance_total, prev_result.allowance_total if prev_result else None)),
     )
     rows += stat_row_html(
-        "💰", SAVINGS_COLOR, "Individual savings", f"£{result.individual_savings_total:,.2f}",
+        "💰", SAVINGS_COLOR, "Personal savings", f"£{result.personal_savings_total:,.2f}",
         delta_pill_html(
             money_delta(
-                result.individual_savings_total,
-                prev_result.individual_savings_total if prev_result else None,
+                result.personal_savings_total,
+                prev_result.personal_savings_total if prev_result else None,
             )
         ),
     )
@@ -416,7 +416,7 @@ def calculate_month(month_id: int):
 # ---------- chart builders ----------
 
 def build_pie_figure(result):
-    savings_total = result.individual_savings_total + result.to_easy_access + result.to_long_term
+    savings_total = result.personal_savings_total + result.to_easy_access + result.to_long_term
     slices = [
         ("Bills", max(result.bills_total, 0), BILLS_COLOR),
         ("Personal spending", max(result.allowance_total, 0), PERSONAL_COLOR),
@@ -496,7 +496,7 @@ def build_sankey_figure(result):
 
     labels = [
         "Cal income", "Dani income", "Total income",
-        "Bills", "Allowances", "Individual savings", "Joint savings",
+        "Bills", "Allowances", "Personal savings", "Joint savings",
         "Easy-access", "Long-term",
     ]
     node_colors = [
@@ -520,7 +520,7 @@ def build_sankey_figure(result):
         (idx["Dani income"], idx["Total income"], result.dani_income, link_source_colors[1]),
         (idx["Total income"], idx["Bills"], result.bills_total, BILLS_COLOR),
         (idx["Total income"], idx["Allowances"], result.allowance_total, PERSONAL_COLOR),
-        (idx["Total income"], idx["Individual savings"], result.individual_savings_total, SAVINGS_COLOR),
+        (idx["Total income"], idx["Personal savings"], result.personal_savings_total, SAVINGS_COLOR),
         (idx["Total income"], idx["Joint savings"], max(joint_savings, 0), LONG_TERM_COLOR),
         (idx["Joint savings"], idx["Easy-access"], result.to_easy_access, EASY_ACCESS_COLOR),
         (idx["Joint savings"], idx["Long-term"], result.to_long_term, "#B3492F"),
@@ -546,19 +546,19 @@ def build_sankey_figure(result):
 
 
 def build_savings_rate_figure(confirmed_months):
-    """Two lines: the fixed individual savings rate, and the total rate
-    once the joint leftover is included - shows how much more you're
-    actually saving beyond the mandated percentage."""
-    labels, individual_rate, total_rate = [], [], []
+    """Two lines: the personal savings rate (what's left after bills,
+    allowances and the joint-savings cut, shared by contribution), and the
+    total rate once joint savings is included too."""
+    labels, personal_rate, total_rate = [], [], []
     for m in confirmed_months:
         result, _ = calculate_month(m["id"])
         labels.append(f"{calendar.month_abbr[m['month']]} {m['year']}")
         if result.total_income > 0:
-            individual_rate.append(result.individual_savings_total / result.total_income * 100)
-            total_saved = result.individual_savings_total + result.to_easy_access + result.to_long_term
+            personal_rate.append(result.personal_savings_total / result.total_income * 100)
+            total_saved = result.personal_savings_total + result.to_easy_access + result.to_long_term
             total_rate.append(total_saved / result.total_income * 100)
         else:
-            individual_rate.append(0)
+            personal_rate.append(0)
             total_rate.append(0)
 
     fig = go.Figure(data=[
@@ -568,7 +568,7 @@ def build_savings_rate_figure(confirmed_months):
             fillcolor="rgba(6,167,125,0.12)", marker=dict(size=7),
         ),
         go.Scatter(
-            x=labels, y=individual_rate, name="Individual savings rate (fixed %)",
+            x=labels, y=personal_rate, name="Personal savings rate",
             mode="lines+markers", line=dict(color="#8E6FB5", width=2, dash="dot"),
             marker=dict(size=6),
         ),
@@ -626,7 +626,7 @@ def build_csv_bytes() -> bytes:
         "year", "month", "confirmed",
         "cal_income", "dani_income", "total_income",
         "bills_total", "allowance_per_person", "allowance_total",
-        "savings_rate", "cal_individual_savings", "dani_individual_savings",
+        "savings_rate", "cal_personal_savings", "dani_personal_savings",
         "remainder", "is_shortfall",
         "current_easy_access_balance", "easy_access_target",
         "to_easy_access", "to_long_term",
@@ -643,8 +643,8 @@ def build_csv_bytes() -> bytes:
             "allowance_per_person": result.allowance_per_person,
             "allowance_total": result.allowance_total,
             "savings_rate": result.savings_rate,
-            "cal_individual_savings": result.cal_individual_savings,
-            "dani_individual_savings": result.dani_individual_savings,
+            "cal_personal_savings": result.cal_personal_savings,
+            "dani_personal_savings": result.dani_personal_savings,
             "remainder": result.remainder, "is_shortfall": result.is_shortfall,
             "current_easy_access_balance": result.current_easy_access_balance,
             "easy_access_target": result.easy_access_target,
@@ -749,17 +749,20 @@ def render_dashboard():
             st.caption(
                 "Income lands in each person's own account. These are the transfers "
                 "to make out of it once you've been paid - your own bills just stay "
-                "put and get paid from there directly."
+                "put and get paid from there directly. (Joint then covers joint "
+                "bills, pays your allowance back out, and splits what's left as "
+                "personal savings by how much each of you put in - it's all "
+                "netted into the one 'To joint account' figure below.)"
             )
-            cal_total_out = result.cal_to_joint + result.allowance_per_person + result.cal_individual_savings
-            dani_total_out = result.dani_to_joint + result.allowance_per_person + result.dani_individual_savings
+            cal_total_out = result.cal_to_joint + result.allowance_per_person + result.cal_personal_savings
+            dani_total_out = result.dani_to_joint + result.allowance_per_person + result.dani_personal_savings
 
             col_cal, col_dani = st.columns(2)
             with col_cal:
                 st.markdown(
                     person_transfer_card_html(
                         "Cal", result.cal_to_joint, result.allowance_per_person,
-                        result.cal_individual_savings, cal_total_out, "cal-card",
+                        result.cal_personal_savings, cal_total_out, "cal-card",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -773,7 +776,7 @@ def render_dashboard():
                 st.markdown(
                     person_transfer_card_html(
                         "Dani", result.dani_to_joint, result.allowance_per_person,
-                        result.dani_individual_savings, dani_total_out, "dani-card",
+                        result.dani_personal_savings, dani_total_out, "dani-card",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -785,10 +788,11 @@ def render_dashboard():
                     )
 
             st.caption(
-                f"Joint account then covers joint-tagged bills (£{result.joint_bills_total:,.2f}) "
-                "and whatever's left over goes to joint savings - Cal and Dani's "
-                "own personal bills are paid straight from their own accounts and "
-                "never touch the joint account."
+                f"Joint bills: £{result.joint_bills_total:,.2f} · "
+                f"Joint savings ({result.savings_rate:.0%} of what's left after bills & allowances): "
+                f"£{result.joint_savings:,.2f} · "
+                f"Personal savings split {result.cal_contribution_share:.0%} / "
+                f"{result.dani_contribution_share:.0%} by contribution."
             )
 
     # ---------- Trends ----------
@@ -995,27 +999,38 @@ def render_results():
         st.markdown(f"**Total income: £{result.total_income:,.2f}**")
         st.divider()
         st.markdown(stat_row_html("🧾", BILLS_COLOR, "Bills & expenses", f"-£{result.bills_total:,.2f}"), unsafe_allow_html=True)
+        st.caption(
+            f"Of which £{result.cal_personal_bills:,.2f} is Cal's own, "
+            f"£{result.dani_personal_bills:,.2f} is Dani's own, and "
+            f"£{result.joint_bills_total:,.2f} is joint."
+        )
         st.markdown(
             stat_row_html("💸", PERSONAL_COLOR, f"Allowances (£{result.allowance_per_person:,.2f} x 2)", f"-£{result.allowance_total:,.2f}"),
             unsafe_allow_html=True,
         )
+        st.divider()
+        st.markdown(f"**Left after bills & allowances: £{result.remainder:,.2f}**")
+        st.markdown(
+            stat_row_html("🏦", LONG_TERM_COLOR, f"Joint savings ({result.savings_rate:.0%})", f"-£{result.joint_savings:,.2f}"),
+            unsafe_allow_html=True,
+        )
+        st.markdown(stat_row_html("🟢", EASY_ACCESS_COLOR, "  → To easy-access pot", f"£{result.to_easy_access:,.2f}"), unsafe_allow_html=True)
+        st.markdown(stat_row_html("📈", LONG_TERM_COLOR, "  → To long-term pot", f"£{result.to_long_term:,.2f}"), unsafe_allow_html=True)
+        st.divider()
         savings_rows = _flatten_html(f"""
-        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Individual savings ({result.savings_rate:.0%} of £{result.cal_savings_base:,.2f})</span></div><span class="stat-row-value">-£{result.cal_individual_savings:,.2f}</span></div>
-        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Individual savings ({result.savings_rate:.0%} of £{result.dani_savings_base:,.2f})</span></div><span class="stat-row-value">-£{result.dani_individual_savings:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('C', 'Cal', 28)}<span>Personal savings ({result.cal_contribution_share:.0%} of pot)</span></div><span class="stat-row-value">£{result.cal_personal_savings:,.2f}</span></div>
+        <div class="stat-row"><div class="stat-row-left">{avatar_html('D', 'Dani', 28)}<span>Personal savings ({result.dani_contribution_share:.0%} of pot)</span></div><span class="stat-row-value">£{result.dani_personal_savings:,.2f}</span></div>
         """)
         st.markdown(savings_rows, unsafe_allow_html=True)
         st.caption(
-            "Savings base = income minus that person's own Cal/Dani-tagged bills, "
-            "so one person's personal bills no longer reduce the other's savings."
+            "Personal savings pot = what's left after bills, allowances and joint "
+            "savings, split between you in proportion to what each of you put "
+            "into the joint pot (your income minus your own personal bills)."
         )
-        st.divider()
-        st.markdown(f"**Remaining for joint savings: £{result.remainder:,.2f}**")
-        st.markdown(stat_row_html("🟢", EASY_ACCESS_COLOR, "To easy-access pot", f"£{result.to_easy_access:,.2f}"), unsafe_allow_html=True)
-        st.markdown(stat_row_html("📈", LONG_TERM_COLOR, "To long-term pot", f"£{result.to_long_term:,.2f}"), unsafe_allow_html=True)
 
     if result.is_shortfall:
         st.error(
-            f"⚠ Shortfall this month: income doesn't cover bills, allowances and savings "
+            f"⚠ Shortfall this month: income doesn't cover bills and allowances "
             f"by £{-result.remainder:,.2f}. Nothing has been adjusted automatically - "
             f"decide how to handle it and re-edit the month if needed."
         )
@@ -1045,8 +1060,13 @@ def render_settings():
             step=1.0, format="%.2f",
         )
         rate_pct = st.number_input(
-            "Individual savings rate (%)", value=float(settings["savings_rate"]) * 100,
+            "Joint savings rate (%)", value=float(settings["savings_rate"]) * 100,
             step=1.0, format="%.1f", min_value=0.0, max_value=100.0,
+        )
+        st.caption(
+            "This is the share of what's left (after bills and allowances) that "
+            "goes to joint savings - everything else becomes personal savings, "
+            "split between Cal and Dani by how much each of you contributed."
         )
         target = st.number_input(
             "Easy-access savings target (£)", value=float(settings["easy_access_target"]),
