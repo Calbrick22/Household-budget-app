@@ -341,18 +341,24 @@ def empty_state_html(icon: str, message: str) -> str:
     """)
 
 
-def person_transfer_card_html(person: str, to_joint: float, to_spending: float, to_savings: float, total_out: float, css_class: str) -> str:
-    """Three-way transfer breakdown out of a person's own personal account:
-    joint contribution, everyday-spending account, personal savings."""
-    rows = stat_row_html("🏦", BILLS_COLOR, "To joint account", f"£{max(to_joint, 0):,.2f}")
-    rows += stat_row_html("💸", PERSONAL_COLOR, "To personal spending", f"£{to_spending:,.2f}")
-    rows += stat_row_html("💰", SAVINGS_COLOR, "To personal savings", f"£{to_savings:,.2f}")
+def person_transfer_card_html(
+    person: str, to_joint: float, to_spending: float, to_savings: float,
+    personal_bills: float, total_out: float, css_class: str,
+) -> str:
+    """The transfers to make out of a person's income account, in the order
+    to make them: joint first (savings & bills), then personal spending,
+    then personal savings - whatever's left after those three covers that
+    person's own bills, and never has to move at all."""
+    rows = stat_row_html("🏦", BILLS_COLOR, "1. Joint account (joint savings & bills)", f"£{max(to_joint, 0):,.2f}")
+    rows += stat_row_html("💸", PERSONAL_COLOR, "2. Personal account (allowance)", f"£{to_spending:,.2f}")
+    rows += stat_row_html("💰", SAVINGS_COLOR, "3. Personal savings", f"£{to_savings:,.2f}")
+    rows += stat_row_html("🧾", BILLS_COLOR, "Left in account for personal bills", f"£{personal_bills:,.2f}")
     initial = person[0]
     return _flatten_html(f"""
     <div class="person-card {css_class}">
         <h4 style="display:flex; align-items:center;">{avatar_html(initial, person, 32)}From {person}'s account</h4>
         {rows}
-        <p class="total-line">Total moved - £{max(total_out, 0):,.2f}</p>
+        <p class="total-line">Total transferred out - £{max(total_out, 0):,.2f}</p>
     </div>
     """)
 
@@ -747,12 +753,10 @@ def render_dashboard():
         else:
             result, fin = calculate_month(latest["id"])
             st.caption(
-                "Income lands in each person's own account. These are the transfers "
-                "to make out of it once you've been paid - your own bills just stay "
-                "put and get paid from there directly. (Joint then covers joint "
-                "bills, pays your allowance back out, and splits what's left as "
-                "personal savings by how much each of you put in - it's all "
-                "netted into the one 'To joint account' figure below.)"
+                "Income lands in each person's own account. Make these three "
+                "transfers out of it, in order - whatever's left afterwards is "
+                "exactly enough for that person's own bills, so it never has to "
+                "move at all."
             )
             cal_total_out = result.cal_to_joint + result.allowance_per_person + result.cal_personal_savings
             dani_total_out = result.dani_to_joint + result.allowance_per_person + result.dani_personal_savings
@@ -762,7 +766,8 @@ def render_dashboard():
                 st.markdown(
                     person_transfer_card_html(
                         "Cal", result.cal_to_joint, result.allowance_per_person,
-                        result.cal_personal_savings, cal_total_out, "cal-card",
+                        result.cal_personal_savings, result.cal_personal_bills,
+                        cal_total_out, "cal-card",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -776,7 +781,8 @@ def render_dashboard():
                 st.markdown(
                     person_transfer_card_html(
                         "Dani", result.dani_to_joint, result.allowance_per_person,
-                        result.dani_personal_savings, dani_total_out, "dani-card",
+                        result.dani_personal_savings, result.dani_personal_bills,
+                        dani_total_out, "dani-card",
                     ),
                     unsafe_allow_html=True,
                 )
