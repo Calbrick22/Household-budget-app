@@ -341,16 +341,18 @@ def empty_state_html(icon: str, message: str) -> str:
     """)
 
 
-def person_card_html(title: str, person: str, spending: float, bills: float, savings: float, total: float, css_class: str) -> str:
-    rows = stat_row_html("💸", PERSONAL_COLOR, "Spending", f"£{spending:,.2f}")
-    rows += stat_row_html("🧾", BILLS_COLOR, "Bills", f"£{bills:,.2f}")
-    rows += stat_row_html("💰", SAVINGS_COLOR, "Savings", f"£{savings:,.2f}")
+def person_transfer_card_html(person: str, to_joint: float, to_spending: float, to_savings: float, total_out: float, css_class: str) -> str:
+    """Three-way transfer breakdown out of a person's own personal account:
+    joint contribution, everyday-spending account, personal savings."""
+    rows = stat_row_html("🏦", BILLS_COLOR, "To joint account", f"£{max(to_joint, 0):,.2f}")
+    rows += stat_row_html("💸", PERSONAL_COLOR, "To personal spending", f"£{to_spending:,.2f}")
+    rows += stat_row_html("💰", SAVINGS_COLOR, "To personal savings", f"£{to_savings:,.2f}")
     initial = person[0]
     return _flatten_html(f"""
     <div class="person-card {css_class}">
-        <h4 style="display:flex; align-items:center;">{avatar_html(initial, person, 32)}{title}</h4>
+        <h4 style="display:flex; align-items:center;">{avatar_html(initial, person, 32)}From {person}'s account</h4>
         {rows}
-        <p class="total-line">Total - £{total:,.2f}</p>
+        <p class="total-line">Total moved - £{max(total_out, 0):,.2f}</p>
     </div>
     """)
 
@@ -745,33 +747,48 @@ def render_dashboard():
         else:
             result, fin = calculate_month(latest["id"])
             st.caption(
-                "What to move out of the joint account once both paychecks have "
-                "landed in it."
+                "Income lands in each person's own account. These are the transfers "
+                "to make out of it once you've been paid - your own bills just stay "
+                "put and get paid from there directly."
             )
-            cal_total = result.allowance_per_person + fin["cal_bills"] + result.cal_individual_savings
-            dani_total = result.allowance_per_person + fin["dani_bills"] + result.dani_individual_savings
+            cal_total_out = result.cal_to_joint + result.allowance_per_person + result.cal_individual_savings
+            dani_total_out = result.dani_to_joint + result.allowance_per_person + result.dani_individual_savings
 
             col_cal, col_dani = st.columns(2)
             with col_cal:
                 st.markdown(
-                    person_card_html(
-                        "To Cal", "Cal", result.allowance_per_person, fin["cal_bills"],
-                        result.cal_individual_savings, cal_total, "cal-card",
+                    person_transfer_card_html(
+                        "Cal", result.cal_to_joint, result.allowance_per_person,
+                        result.cal_individual_savings, cal_total_out, "cal-card",
                     ),
                     unsafe_allow_html=True,
                 )
+                if result.cal_to_joint < 0:
+                    st.warning(
+                        "Cal's allowance and savings add up to more than what's left "
+                        "after his own bills this month - the joint transfer can't go "
+                        "negative, so the shortfall needs covering another way."
+                    )
             with col_dani:
                 st.markdown(
-                    person_card_html(
-                        "To Dani", "Dani", result.allowance_per_person, fin["dani_bills"],
-                        result.dani_individual_savings, dani_total, "dani-card",
+                    person_transfer_card_html(
+                        "Dani", result.dani_to_joint, result.allowance_per_person,
+                        result.dani_individual_savings, dani_total_out, "dani-card",
                     ),
                     unsafe_allow_html=True,
                 )
+                if result.dani_to_joint < 0:
+                    st.warning(
+                        "Dani's allowance and savings add up to more than what's left "
+                        "after her own bills this month - the joint transfer can't go "
+                        "negative, so the shortfall needs covering another way."
+                    )
 
             st.caption(
-                "Bills tagged 'Joint' aren't listed here - they're paid directly from "
-                "the joint account, not transferred out."
+                f"Joint account then covers joint-tagged bills (£{result.joint_bills_total:,.2f}) "
+                "and whatever's left over goes to joint savings - Cal and Dani's "
+                "own personal bills are paid straight from their own accounts and "
+                "never touch the joint account."
             )
 
     # ---------- Trends ----------
