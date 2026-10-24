@@ -2,11 +2,13 @@ import Link from "next/link";
 import { Suspense } from "react";
 import * as db from "@/lib/db";
 import { calculateMonth, nextMonthAfter, previousConfirmed, settingsFor } from "@/lib/budget";
-import { monthLabel, monthName } from "@/lib/format";
+import { money, monthLabel, monthName } from "@/lib/format";
 import { requireSession } from "@/lib/session";
 import { StatusPill } from "@/components/money";
 import { AddMonthMenu, MonthPicker, StartMonthButton, Toast } from "@/components/month-controls";
-import { Comparison, EasyAccess, JointLane, NegativeTransferNotes, PersonLane, SettingsUsed, Working, finding } from "@/components/month-cards";
+import { Comparison, EasyAccess, JointLane, MonthNotes, PersonLane, SettingsUsed, WorkingSteps, WorkingSummary, finding } from "@/components/month-cards";
+import { LaneCarousel } from "@/components/lane-carousel";
+import { WorkingSheet } from "@/components/working-sheet";
 
 export default async function ThisMonth({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   await requireSession();
@@ -35,36 +37,45 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
   const prev = previousConfirmed(months, month);
   const prevFin = prev ? await db.getFinancials(prev.id) : null;
   const prevResult = prevFin ? calculateMonth(prevFin, live) : null;
-  const options = [...months].reverse().map((m) => ({ id: m.id, label: monthLabel(m) + (m.confirmed ? "" : " (draft)") }));
+  // Each month in the picker carries its headline, worked out with its own settings.
+  const allFin = await db.getAllFinancials();
+  const options = [...allFin].reverse().map((f) => {
+    const res = calculateMonth(f, live);
+    return {
+      id: f.month.id, label: monthLabel(f.month), confirmed: f.month.confirmed,
+      note: res.isShortfall ? `Short by ${money(-res.remainder)}` : `${money(res.jointSavings + res.personalSavingsTotal)} saved`,
+    };
+  });
 
   return (
     <>
       <Suspense><Toast /></Suspense>
       <div className="title-row">
-        <div className="title"><h1>{monthLabel(month)}</h1><StatusPill confirmed={month.confirmed} /></div>
+        <div className="title"><MonthPicker options={options} current={month.id} title={monthLabel(month)} /><StatusPill confirmed={month.confirmed} /></div>
         <div className="actions">
-          <MonthPicker options={options} current={month.id} />
           <Link className={`btn${month.confirmed ? "" : " primary"}`} href={`/month/${month.id}/edit`}>{month.confirmed ? "Edit month" : "Finish month"}</Link>
           <StartMonthButton year={next.year} month={next.month} primary={month.confirmed} />
         </div>
       </div>
       <p className="finding">{finding(r)}</p>
       {!month.confirmed && <p className="finding" style={{ color: "var(--warning-ink)" }}>Draft: these figures are a preview until you finish the month.</p>}
-      <NegativeTransferNotes r={r} />
+      <MonthNotes r={r} />
 
-      <div className="grid-3 section-gap">
+      <LaneCarousel>
         <PersonLane r={r} who="Cal" />
         <JointLane r={r} />
         <PersonLane r={r} who="Dani" />
-      </div>
+      </LaneCarousel>
 
-      <div className="grid-2-1 section-gap">
-        <Working r={r} />
+      <div className="below">
         <div className="stack">
+          <WorkingSheet month={monthLabel(month)} summary={<WorkingSummary r={r} />}>
+            <WorkingSteps r={r} />
+            <SettingsUsed s={settingsFor(fin, live)} frozen={fin.frozenSettings != null} />
+          </WorkingSheet>
           <EasyAccess r={r} />
-          <Comparison r={r} prev={prevResult} prevName={prev ? monthName(prev.month) : ""} />
-          <SettingsUsed s={settingsFor(fin, live)} frozen={fin.frozenSettings != null} />
         </div>
+        <Comparison r={r} prev={prevResult} prevName={prev ? monthName(prev.month) : ""} />
       </div>
     </>
   );

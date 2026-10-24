@@ -47,11 +47,18 @@ export function JointLane({ r }: { r: WaterfallResult }) {
   );
 }
 
-export function NegativeTransferNotes({ r }: { r: WaterfallResult }) {
+/** Warnings that must stay in view: a shortfall, and a transfer that would go negative. */
+export function MonthNotes({ r }: { r: WaterfallResult }) {
   const notes = ([["Cal", r.calToJoint, "his"], ["Dani", r.daniToJoint, "her"]] as const).filter(([, v]) => v < 0);
-  if (!notes.length) return null;
+  if (!notes.length && !r.isShortfall) return null;
   return (
     <div style={{ marginTop: 12 }}>
+      {r.isShortfall && (
+        <p className="alert bad" role="alert">
+          Shortfall this month: income doesn&apos;t cover bills and allowances by {money(-r.remainder)}. Nothing has been
+          adjusted automatically - decide how to handle it and re-edit the month if needed.
+        </p>
+      )}
       {notes.map(([who, , pronoun]) => (
         <p key={who} className="alert bad" role="alert">
           {who}&apos;s allowance and savings add up to more than what&apos;s left after {pronoun} own bills this month -
@@ -62,10 +69,10 @@ export function NegativeTransferNotes({ r }: { r: WaterfallResult }) {
   );
 }
 
-export function Working({ r }: { r: WaterfallResult }) {
+/** The waterfall step by step, in the model's own order (shown in the drill-down panel). */
+export function WorkingSteps({ r }: { r: WaterfallResult }) {
   return (
-    <section className="card">
-      <h2>How the split is worked out</h2>
+    <>
       <div className="step">
         <p className="step-title">1. Income, less each person&apos;s own bills</p>
         <Row label="Cal" value={money(r.calRemainder)} sub={`${money(r.calIncome)} income − ${money(r.calPersonalBills)} personal bills`} />
@@ -79,9 +86,8 @@ export function Working({ r }: { r: WaterfallResult }) {
         <Row label="Left after bills and allowances" value={money(r.remainder)} cls="total" />
       </div>
       {r.isShortfall && (
-        <p className="alert bad" role="alert" style={{ marginTop: 14 }}>
-          Shortfall this month: income doesn&apos;t cover bills and allowances by {money(-r.remainder)}. Nothing has been
-          adjusted automatically - decide how to handle it and re-edit the month if needed.
+        <p className="alert bad" style={{ marginTop: 14 }}>
+          Short by {money(-r.remainder)}: bills and allowances are more than the pot, so nothing is saved.
         </p>
       )}
       <div className="step">
@@ -94,7 +100,20 @@ export function Working({ r }: { r: WaterfallResult }) {
       <p className="calc" style={{ margin: "14px 0 0" }}>
         All bills this month: {money(r.billsTotal)} (Cal {money(r.calPersonalBills)}, Dani {money(r.daniPersonalBills)}, joint {money(r.jointBillsTotal)}).
       </p>
-    </section>
+    </>
+  );
+}
+
+/** The three totals the working arrives at, for the card that opens it. */
+export function WorkingSummary({ r }: { r: WaterfallResult }) {
+  return (
+    <>
+      <Row label="Into the joint pot" value={money(r.pot)} sub={`${money(r.totalIncome)} income − ${money(r.calPersonalBills + r.daniPersonalBills)} personal bills`} />
+      <Row label="Left after bills and allowances" value={money(r.remainder)} sub={`− ${money(r.jointBillsTotal)} joint bills − ${money(r.allowanceTotal)} allowances`} />
+      {r.isShortfall
+        ? <Row label="Saved" value={<span style={{ color: "var(--negative)" }}>{money(0)}</span>} sub="a shortfall month saves nothing" />
+        : <Row label="Saved" value={money(r.jointSavings + r.personalSavingsTotal)} sub={`${money(r.jointSavings)} joint · ${money(r.personalSavingsTotal)} personal`} />}
+    </>
   );
 }
 
@@ -133,6 +152,8 @@ export function Comparison({ r, prev, prevName }: { r: WaterfallResult; prev: Wa
   const lines: [string, number, number, boolean | null][] = [
     ["Income", r.totalIncome, prev.totalIncome, false],
     ["All bills", r.billsTotal, prev.billsTotal, true],
+    ["Allowances", r.allowanceTotal, prev.allowanceTotal, null],
+    ["All savings", r.jointSavings + r.personalSavingsTotal, prev.jointSavings + prev.personalSavingsTotal, false],
     ["Joint savings", r.jointSavings, prev.jointSavings, false],
     ["Personal savings", r.personalSavingsTotal, prev.personalSavingsTotal, false],
     ["Into joint", r.calToJoint + r.daniToJoint, prev.calToJoint + prev.daniToJoint, null],
@@ -150,9 +171,9 @@ export function Comparison({ r, prev, prevName }: { r: WaterfallResult; prev: Wa
 
 export function SettingsUsed({ s, frozen }: { s: Settings; frozen: boolean }) {
   return (
-    <section className="card">
-      <h2>Settings used</h2>
-      <div style={{ marginTop: 8 }}>
+    <>
+      <div className="step">
+        <p className="step-title">Settings used</p>
         <Row label="Allowance per person" value={money(s.allowancePerPerson)} />
         <Row label="Joint savings rate" value={ratePct(s.savingsRate)} />
         <Row label="Easy-access target" value={money(s.easyAccessTarget)} />
@@ -161,7 +182,7 @@ export function SettingsUsed({ s, frozen }: { s: Settings; frozen: boolean }) {
         {frozen ? "Frozen when this month was confirmed, so changing Settings won't change it."
           : "Today's settings. They are frozen with this month when you finish it."}
       </p>
-    </section>
+    </>
   );
 }
 

@@ -4,8 +4,8 @@ export default function Loading() {
   return (
     <div aria-busy="true" aria-label="Loading">
       {block(34, "280px")}
-      <div className="grid-3 section-gap">
-        {[0, 1, 2].map((i) => <section key={i} className="card stack" style={{ gap: 14 }}>{block(32, "60%")}{block(38, "50%")}{block(16)}{block(16)}{block(16)}</section>)}
+      <div className="lanes section-gap">
+        {[0, 1, 2].map((i) => <div key={i} className="lane-slide"><section className="card stack" style={{ gap: 14 }}>{block(32, "60%")}{block(38, "50%")}{block(16)}{block(16)}{block(16)}</section></div>)}
       </div>
     </div>
   );
