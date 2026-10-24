@@ -7,6 +7,16 @@ import * as db from "@/lib/db";
 import { endSession, passwordMatches, requireSession, startSession } from "@/lib/session";
 
 export async function login(_: { error?: string } | undefined, form: FormData): Promise<{ error?: string }> {
+  // Name a missing setting rather than failing with a bare server error. Only
+  // the variable's name is shown, never its value.
+  const missing = [
+    !process.env.APP_PASSWORD && "APP_PASSWORD",
+    (process.env.SESSION_SECRET ?? "").length < 32 && "SESSION_SECRET (at least 32 characters)",
+    !process.env.DATABASE_URL && "DATABASE_URL",
+  ].filter(Boolean);
+  if (missing.length) {
+    return { error: `The app isn't set up yet. In Vercel, add ${missing.join(", ")} under Settings → Environment Variables, then redeploy.` };
+  }
   const entered = String(form.get("password") ?? "");
   if (!passwordMatches(entered)) {
     await new Promise((r) => setTimeout(r, 600)); // slows guessing a little
