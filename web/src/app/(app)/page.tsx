@@ -15,13 +15,14 @@ import { CardDetail } from "@/components/card-detail";
 import { MonthBody, MonthStrip, MonthView } from "@/components/month-strip";
 import { ChangeTile, NextTile, PotTile, SavedTile } from "@/components/tiles";
 import { FinishMoment } from "@/components/finish-moment";
+import { MonthCheckIn } from "@/components/month-checkin";
 import { StackedBars } from "@/components/charts";
 
 export const metadata = { title: "This month" };
 
-export default async function ThisMonth({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function ThisMonth({ searchParams }: { searchParams: Promise<{ month?: string; checkin?: string }> }) {
   await requireSession();
-  const [{ month: wanted }, allFin, live] = await Promise.all([searchParams, db.getAllFinancials(), db.getSettings()]);
+  const [{ month: wanted, checkin }, allFin, live] = await Promise.all([searchParams, db.getAllFinancials(), db.getSettings()]);
   const months = allFin.map((f) => f.month);
   const next = nextMonthAfter(months);
 
@@ -63,18 +64,42 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
     });
 
   const latest = months[months.length - 1];
-  const finish = !month.confirmed ? { name: monthName(month.month), href: `/month/${month.id}/edit` }
-    : !latest.confirmed ? { name: monthLabel(latest), href: `/month/${latest.id}/edit` } : null;
+  const checkInHref = (id: number) => `/?month=${id}&checkin=1`;
+  const finish = !month.confirmed ? { name: monthName(month.month), href: checkInHref(month.id) }
+    : !latest.confirmed ? { name: monthLabel(latest), href: checkInHref(latest.id) } : null;
   const label = monthLabel(month);
   const toJoint = (v: number) => Math.max(v, 0);
   const summary = r.isShortfall
     ? `${label} is confirmed, short by ${money(-r.remainder)}.`
     : `${label} is confirmed: ${money(totalSaved(r))} saved. Cal ${money(toJoint(r.calToJoint))} and Dani ${money(toJoint(r.daniToJoint))} into joint.`;
 
+  // The check-in opens over the month when the URL asks for it.
+  async function checkIn() {
+    const [templates, prevBills, prevIncome] = await Promise.all([
+      db.getActiveTemplates(), prev ? db.getBillEntries(prev.id) : [], prev ? db.getIncome(prev.id) : null,
+    ]);
+    const lastAmounts: Record<number, number> = {};
+    for (const b of prevBills) if (b.templateId != null) lastAmounts[b.templateId] = (lastAmounts[b.templateId] ?? 0) + b.amount;
+    return (
+      <MonthCheckIn
+        // A new key after every save, so the check-in starts again from what was stored.
+        key={`${bills.map((b) => `${b.id}:${b.amount}:${b.tag}:${b.name}`).join("|")}|${fin.calIncome}|${fin.daniIncome}|${month!.easyAccessBalance}`}
+        monthId={month!.id} monthName={label} previousName={prev ? monthName(prev.month) : null}
+        confirmed={month!.confirmed} settings={settingsFor(fin, live)} bills={bills}
+        variesIds={templates.filter((t) => t.varies).map((t) => t.id)} lastAmounts={lastAmounts}
+        calSalary={income["Cal:Salary"] ?? 0} calRaf={income["Cal:RAF"] ?? 0} daniIncome={income["Dani:Income"] ?? 0}
+        lastIncome={prevIncome ? { calSalary: prevIncome["Cal:Salary"] ?? 0, calRaf: prevIncome["Cal:RAF"] ?? 0, daniIncome: prevIncome["Dani:Income"] ?? 0 } : null}
+        easyAccessBalance={month!.easyAccessBalance}
+        suggestion={prevResult && prev ? { from: monthName(prev.month), balance: prevResult.currentEasyAccessBalance, added: prevResult.toEasyAccess } : null}
+      />
+    );
+  }
+
   return (
     <MonthView>
       <Suspense><Toast /></Suspense>
       <Suspense><FinishMoment summary={summary} /></Suspense>
+      {checkin === "1" && await checkIn()}
       <h1 className="sr-only">{label}</h1>
       <MonthStrip
         months={months.map((m) => ({ id: m.id, month: monthShort(m.month), year: m.year, label: monthLabel(m), confirmed: m.confirmed }))}
@@ -86,7 +111,7 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
             <StatusPill confirmed={month.confirmed} />
             <p className="finding">{finding(r)}</p>
           </div>
-          <Link className="btn" href={`/month/${month.id}/edit`}>Edit month</Link>
+          <Link className="btn" href={checkInHref(month.id)} scroll={false}>{month.confirmed ? "Edit month" : "Check in"}</Link>
         </div>
         {!month.confirmed && <p className="finding" style={{ color: "var(--warning-ink)" }}>Draft: these figures are a preview until you finish the month.</p>}
         <MonthNotes r={r} />

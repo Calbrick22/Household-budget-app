@@ -50,6 +50,9 @@ const SCHEMA = [
   `ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_allowance_per_person NUMERIC`,
   `ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_savings_rate NUMERIC`,
   `ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_easy_access_target NUMERIC`,
+  // Recurring bills whose amount changes from month to month (the Amex, say):
+  // the month check-in asks about these first. The Streamlit app ignores it.
+  `ALTER TABLE bill_templates ADD COLUMN IF NOT EXISTS varies BOOLEAN NOT NULL DEFAULT FALSE`,
 ];
 
 const FREEZE_SETTINGS_SQL = `
@@ -157,28 +160,50 @@ export async function saveSettings(s: Settings): Promise<void> {
 
 // ---------- recurring bills ----------
 
-export interface Template { id: number; name: string; defaultAmount: number; tag: Tag }
+export interface Template { id: number; name: string; defaultAmount: number; tag: Tag; varies: boolean }
 
 export async function getActiveTemplates(): Promise<Template[]> {
-  const rows = await query<{ id: number; name: string; default_amount: string; tag: Tag }>(
-    "SELECT id, name, default_amount, tag FROM bill_templates WHERE active = TRUE ORDER BY name");
-  return rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: num(r.default_amount), tag: r.tag }));
+  const rows = await query<{ id: number; name: string; default_amount: string; tag: Tag; varies: boolean }>(
+    "SELECT id, name, default_amount, tag, varies FROM bill_templates WHERE active = TRUE ORDER BY name");
+  return rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: num(r.default_amount), tag: r.tag, varies: r.varies }));
 }
 
 /** Save the recurring list: removals (soft), edits and additions in one go. */
-export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string }[], removedIds: number[]): Promise<void> {
+export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean }[], removedIds: number[]): Promise<void> {
   await transaction(async (c) => {
     for (const id of removedIds) await c.query("UPDATE bill_templates SET active = FALSE WHERE id = $1", [id]);
     for (const r of rows) {
       if (!r.name.trim()) continue;
       assertTag(r.tag);
       if (r.id) {
-        await c.query("UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3 WHERE id = $4", [r.name, r.defaultAmount, r.tag, r.id]);
+        await c.query("UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3, varies = $4 WHERE id = $5",
+          [r.name, r.defaultAmount, r.tag, r.varies, r.id]);
       } else {
-        await c.query("INSERT INTO bill_templates (name, default_amount, tag, active) VALUES ($1, $2, $3, TRUE)", [r.name, r.defaultAmount, r.tag]);
+        await c.query("INSERT INTO bill_templates (name, default_amount, tag, active, varies) VALUES ($1, $2, $3, TRUE, $4)",
+          [r.name, r.defaultAmount, r.tag, r.varies]);
       }
     }
   });
+}
+
+/** What each recurring bill came to in each month it appeared in, oldest first. */
+export async function getBillHistory(): Promise<{ templateId: number; year: number; month: number; amount: number }[]> {
+  const rows = await query<{ template_id: number; year: number; month: number; amount: string }>(
+    `SELECT e.template_id, m.year, m.month, SUM(e.amount) AS amount
+     FROM bill_entries e JOIN months m ON m.id = e.month_id
+     WHERE e.template_id IS NOT NULL GROUP BY e.template_id, m.year, m.month ORDER BY m.year, m.month`);
+  return rows.map((r) => ({ templateId: r.template_id, year: r.year, month: r.month, amount: num(r.amount) }));
+}
+
+/** One-off bills from the last six months, newest first, one per name. */
+export async function getRecentOneOffs(): Promise<{ name: string; amount: number; tag: Tag }[]> {
+  const rows = await query<{ name: string; amount: string; tag: Tag }>(
+    `SELECT DISTINCT ON (lower(e.name)) e.name, e.amount, e.tag
+     FROM bill_entries e JOIN months m ON m.id = e.month_id
+     WHERE e.template_id IS NULL
+       AND (m.year * 12 + m.month) > (SELECT max(year * 12 + month) FROM months) - 6
+     ORDER BY lower(e.name), m.year DESC, m.month DESC`);
+  return rows.map((r) => ({ name: r.name, amount: num(r.amount), tag: r.tag }));
 }
 
 // ---------- months ----------

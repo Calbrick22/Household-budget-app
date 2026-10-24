@@ -2,14 +2,20 @@ import * as db from "@/lib/db";
 import { monthLabel } from "@/lib/format";
 import { requireSession } from "@/lib/session";
 import { Suspense } from "react";
-import { RecurringBills, SettingsForm } from "@/components/settings-forms";
+import { SettingsForm } from "@/components/settings-forms";
+import { BillsBoard, type BillPoint } from "@/components/bills-board";
+import { monthShort } from "@/lib/format";
 import { Toast } from "@/components/month-controls";
 
 export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   await requireSession();
-  const [settings, templates, all] = await Promise.all([db.getSettings(), db.getActiveTemplates(), db.getAllFinancials()]);
+  const [settings, templates, all, billHistory, oneOffs] = await Promise.all([
+    db.getSettings(), db.getActiveTemplates(), db.getAllFinancials(), db.getBillHistory(), db.getRecentOneOffs(),
+  ]);
+  const history: Record<number, BillPoint[]> = {};
+  for (const h of billHistory) (history[h.templateId] ??= []).push({ label: `${monthShort(h.month)} ’${String(h.year).slice(2)}`, amount: h.amount });
   const latest = all[all.length - 1];
   const preview = latest ? {
     label: monthLabel(latest.month), confirmed: latest.month.confirmed,
@@ -32,13 +38,14 @@ export default async function SettingsPage() {
         <SettingsForm key={JSON.stringify(settings)} settings={settings} preview={preview} />
       </div>
 
-      <div className="settings-row">
+      <div className="settings-block">
         <div className="settings-label">
           <h2>Recurring bills</h2>
-          <p>The list new months are built from. Update an amount here the moment it changes (the water bill going up, say) and it carries forward from then on.</p>
-          <p>Removing a bill here only stops it appearing in future months - it won&apos;t touch any month you&apos;ve already created.</p>
+          <p>The bills every new month starts with, by whose they are. Change an amount here the moment it changes (the water bill going up, say) and it carries forward from then on. Removing one only stops it appearing in future months.</p>
+          <p>Tick <b>Varies regularly</b> on a bill that&apos;s different every month, like a credit card, and the month check-in asks about it first.</p>
         </div>
-        <RecurringBills key={templates.map((t) => `${t.id}:${t.defaultAmount}:${t.tag}:${t.name}`).join("|")} templates={templates} />
+        <BillsBoard key={templates.map((t) => `${t.id}:${t.defaultAmount}:${t.tag}:${t.name}:${t.varies}`).join("|")}
+          templates={templates} history={history} oneOffs={oneOffs} />
       </div>
     </>
   );
