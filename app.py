@@ -340,20 +340,31 @@ def status_pill(confirmed: bool) -> str:
 
 # ---------- calculation helpers ----------
 
+def live_settings() -> dict:
+    settings = db.get_settings()
+    return {
+        "allowance_per_person": float(settings["allowance_per_person"]),
+        "savings_rate": float(settings["savings_rate"]),
+        "easy_access_target": float(settings["easy_access_target"]),
+    }
+
+
+def month_settings(fin) -> dict:
+    """A confirmed month keeps the settings it was confirmed with; a draft
+    follows the live settings until it is finished."""
+    return fin["frozen_settings"] or live_settings()
+
+
 @st.cache_data(ttl=5)
 def calculate_month(month_id: int):
-    settings = db.get_settings()
-    allowance = float(settings["allowance_per_person"])
-    savings_rate = float(settings["savings_rate"])
-    target = float(settings["easy_access_target"])
-
     fin = db.get_month_financials(month_id)
     if fin is None:
         return None, None
+    settings = month_settings(fin)
 
     result = calculate_waterfall(
-        fin["cal_income"], fin["dani_income"], fin["bills_total"], allowance,
-        savings_rate, target, fin["current_easy_access_balance"],
+        fin["cal_income"], fin["dani_income"], fin["bills_total"], settings["allowance_per_person"],
+        settings["savings_rate"], settings["easy_access_target"], fin["current_easy_access_balance"],
         cal_personal_bills=fin["cal_bills"], dani_personal_bills=fin["dani_bills"],
     )
     return result, fin
@@ -589,7 +600,7 @@ def page_month():
             render_new_month_controls(months, "empty")
         return
 
-    result, _ = calculate_month(month["id"])
+    result, fin = calculate_month(month["id"])
     title_col, pick_col, action_col = st.columns([5, 2.2, 3.4], vertical_alignment="center")
     html(f'<h1 style="margin:0;">{month_label(month["month"], month["year"])} {status_pill(month["confirmed"])}</h1>', title_col)
     with pick_col:
@@ -627,11 +638,16 @@ def page_month():
     prev = previous_confirmed(months, month)
     prev_result = calculate_month(prev["id"])[0] if prev else None
     prev_name = calendar.month_name[prev["month"]] if prev else ""
+    settings_note = (
+        "Frozen when this month was confirmed, so changing Settings won't change it."
+        if fin["frozen_settings"] else
+        "Today's settings. They are frozen with this month when you finish it."
+    )
     settings_used = f"""<section class="card"><h2>Settings used</h2>
         {row_html("Allowance per person", money(result.allowance_per_person))}
         {row_html("Joint savings rate", f"{result.savings_rate:.0%}")}
         {row_html("Easy-access target", money(result.easy_access_target))}
-        <p class="calc" style="margin:10px 0 0 0;">Today's settings, applied to every month. Change them in Settings.</p></section>"""
+        <p class="calc" style="margin:10px 0 0 0;">{settings_note}</p></section>"""
     html(f'<div class="grid-2-1">{working_html(result)}<div class="stack">{easy_access_html(result)}'
          f'{comparison_html(result, prev_result, prev_name)}{settings_used}</div></div>')
 
@@ -644,10 +660,10 @@ def render_bill_rows_header(amount_label: str):
         html(f'<div class="rows-head">{text}</div>', col)
 
 
-def preview_from_inputs():
+def preview_from_inputs(settings: dict):
     """Run the waterfall on what's typed in right now, before it's saved -
-    the same inputs save_all_fields() writes, so it matches once saved."""
-    settings = db.get_settings()
+    the same inputs save_all_fields() writes, with this month's settings, so
+    it matches once saved."""
     bills_total = cal_bills = dani_bills = 0.0
     for row in st.session_state.bill_rows:
         lid = row["local_id"]
@@ -664,12 +680,31 @@ def preview_from_inputs():
     try:
         return calculate_waterfall(
             cal_income, float(st.session_state["dani_income_input"] or 0), round(bills_total, 2),
-            float(settings["allowance_per_person"]), float(settings["savings_rate"]),
-            float(settings["easy_access_target"]), float(st.session_state["easy_access_input"] or 0),
+            settings["allowance_per_person"], settings["savings_rate"],
+            settings["easy_access_target"], float(st.session_state["easy_access_input"] or 0),
             cal_personal_bills=round(cal_bills, 2), dani_personal_bills=round(dani_bills, 2),
         )
     except ValueError as exc:
         return str(exc)
+
+
+def bill_row_changed(row) -> bool:
+    lid = row["local_id"]
+    return (
+        st.session_state.get(f"name_{lid}", row["name"]).strip() != str(row["name"]).strip()
+        or abs(float(st.session_state.get(f"amount_{lid}", row["amount"]) or 0) - float(row["amount"])) >= 0.005
+        or st.session_state.get(f"tag_{lid}", row["tag"]) != row["tag"]
+    )
+
+
+def changed_recurring_bills() -> list:
+    """Names of bills from the recurring list whose name, amount or tag was
+    edited on this screen (one-off bills never carry forward)."""
+    return [
+        st.session_state.get(f"name_{r['local_id']}", r["name"]) or r["name"]
+        for r in st.session_state.bill_rows
+        if r.get("id") and r.get("template_id") is not None and bill_row_changed(r)
+    ]
 
 
 def preview_html(preview) -> str:
@@ -713,9 +748,11 @@ def page_edit():
 
     if st.session_state.get("loaded_month_id") != month_id:
         bills = db.get_bill_entries(month_id)
-        for b in bills:
+        for pos, b in enumerate(bills):
             b["local_id"] = str(uuid.uuid4())
+            b["pos"] = pos
         st.session_state.bill_rows = bills
+        st.session_state.removed_bill_rows = []
 
         income = {(r["person"], r["source"]): float(r["amount"]) for r in db.get_income_entries(month_id)}
         month = db.get_month(month_id)
@@ -761,9 +798,9 @@ def page_edit():
                     "Tag", TAG_OPTIONS, index=TAG_OPTIONS.index(row["tag"]),
                     key=f"tag_{lid}", label_visibility="collapsed",
                 )
-                if c4.button("", icon=":material/close:", key=f"remove_{lid}", help="Remove this bill now"):
+                if c4.button("", icon=":material/close:", key=f"remove_{lid}", help="Remove when you save"):
                     if row.get("id"):
-                        db.delete_bill_entry(row["id"])
+                        st.session_state.removed_bill_rows.append(row)
                     st.session_state.bill_rows = [
                         r for r in st.session_state.bill_rows if r["local_id"] != lid
                     ]
@@ -779,14 +816,36 @@ def page_edit():
                 for t, v in totals.items()
             ) + f'<span>Total <b>{money(sum(totals.values()))}</b></span></div>')
 
+            removed = st.session_state.removed_bill_rows
+            if removed:
+                names = ", ".join(r["name"] for r in removed)
+                undo_row = st.container(horizontal=True, vertical_alignment="center", gap="small")
+                html(f'<p class="calc" style="margin:0;">Removed when you save: {names}.</p>', undo_row)
+                if undo_row.button("Undo", key="undo_remove"):
+                    st.session_state.bill_rows = sorted(
+                        st.session_state.bill_rows + removed, key=lambda r: r.get("pos", 10_000)
+                    )
+                    st.session_state.removed_bill_rows = []
+                    st.rerun()
+
+            changed = changed_recurring_bills()
+            if changed:
+                names = ", ".join(changed)
+                st.checkbox(
+                    f"Change {names} for future months too",
+                    value=not month["confirmed"], key=f"carry_forward_{month_id}",
+                    help="Updates your recurring bills list, so new months start with the new figure.",
+                )
+
             if st.button("+ Add one-off bill / expense"):
                 st.session_state.bill_rows.append(
-                    {"id": None, "name": "", "amount": 0.0, "tag": "Joint", "local_id": str(uuid.uuid4())}
+                    {"id": None, "name": "", "amount": 0.0, "tag": "Joint", "local_id": str(uuid.uuid4()),
+                     "pos": 10_000 + len(st.session_state.bill_rows)}
                 )
                 st.rerun()
             st.caption(
-                "One-off items here don't carry forward to next month. Editing a bill that came from "
-                "your recurring list also updates that list for future months. The cross removes a bill straight away."
+                "One-off items here don't carry forward to next month. Nothing is removed or changed "
+                "until you save."
             )
 
         with styled_container("mk-card"):
@@ -818,6 +877,11 @@ def page_edit():
                               on_click=lambda v=suggestion: st.session_state.update(easy_access_input=v))
 
     def save_all_fields():
+        for row in st.session_state.removed_bill_rows:
+            db.delete_bill_entry(row["id"])
+        st.session_state.removed_bill_rows = []
+
+        carry = st.session_state.get(f"carry_forward_{month_id}", False)
         for row in st.session_state.bill_rows:
             lid = row["local_id"]
             name = st.session_state[f"name_{lid}"]
@@ -826,7 +890,10 @@ def page_edit():
             if not name.strip():
                 continue
             if row.get("id"):
-                db.update_bill_entry(row["id"], name, amount, tag)
+                # Only a bill that actually changed may carry forward, so an
+                # untouched old month never overwrites a newer recurring amount.
+                db.update_bill_entry(row["id"], name, amount, tag,
+                                     carry_forward=carry and bill_row_changed(row))
             else:
                 db.add_bill_entry(month_id, name, amount, tag)
 
@@ -837,7 +904,7 @@ def page_edit():
 
     with preview_col:
         with styled_container("mk-bare mk-sticky"):
-            html(preview_html(preview_from_inputs()))
+            html(preview_html(preview_from_inputs(month_settings(db.get_month_financials(month_id)))))
             b1, b2 = st.columns(2, gap="small")
             if b1.button("Save draft", width="stretch"):
                 save_all_fields()
@@ -1189,8 +1256,8 @@ def page_trends():
 # ---------- Settings ----------
 
 SETTINGS_CAPTION = (
-    "Changes apply to every month, including ones you've already confirmed: "
-    "past figures are recalculated with these settings."
+    "Changes apply to drafts and to every month you finish from now on. Confirmed "
+    "months keep the settings they were confirmed with."
 )
 
 
@@ -1223,9 +1290,8 @@ def page_settings():
                 "Easy-access target (£)", value=float(settings["easy_access_target"]),
                 step=1.0, format="%.2f",
             )
-            confirmed = [m for m in months if m["confirmed"]]
-            if confirmed:
-                latest = confirmed[-1]
+            if months:
+                latest = months[-1]
                 fin = db.get_month_financials(latest["id"])
                 try:
                     r = calculate_waterfall(
@@ -1233,8 +1299,11 @@ def page_settings():
                         rate_pct / 100, target, fin["current_easy_access_balance"],
                         cal_personal_bills=fin["cal_bills"], dani_personal_bills=fin["dani_bills"],
                     )
-                    html(f"""<div class="preview"><p class="calc" style="margin:0 0 6px 0;">With these settings,
-                    {month_label(latest["month"], latest["year"])} comes out as:</p>
+                    name = month_label(latest["month"], latest["year"])
+                    lead = (f"With these settings, {name} (draft) comes out as:" if not latest["confirmed"] else
+                            f"On {name}'s figures these settings would give the following. {name} itself "
+                            f"keeps the settings it was confirmed with.")
+                    html(f"""<div class="preview"><p class="calc" style="margin:0 0 6px 0;">{lead}</p>
                     {row_html("Joint savings", money(r.joint_savings))}
                     {row_html("Personal savings, Cal / Dani", f"{money(r.cal_personal_savings)} / {money(r.dani_personal_savings)}")}
                     {row_html("Cal / Dani → joint account", f"{money(max(r.cal_to_joint, 0))} / {money(max(r.dani_to_joint, 0))}")}
@@ -1268,6 +1337,7 @@ def render_recurring_bills_section():
             for t in templates:
                 t["local_id"] = str(uuid.uuid4())
             st.session_state.template_rows = templates
+            st.session_state.removed_template_rows = []
             st.session_state.template_rows_loaded = True
 
         render_bill_rows_header("Usual amount (£)")
@@ -1284,12 +1354,21 @@ def render_recurring_bills_section():
                 "Tag", TAG_OPTIONS, index=TAG_OPTIONS.index(row["tag"]),
                 key=f"tmpl_tag_{lid}", label_visibility="collapsed",
             )
-            if c4.button("", icon=":material/close:", key=f"tmpl_remove_{lid}", help="Remove from future months"):
+            if c4.button("", icon=":material/close:", key=f"tmpl_remove_{lid}", help="Remove from future months when you save"):
                 if row.get("id"):
-                    db.deactivate_bill_template(row["id"])
+                    st.session_state.removed_template_rows.append(row)
                 st.session_state.template_rows = [
                     r for r in st.session_state.template_rows if r["local_id"] != lid
                 ]
+                st.rerun()
+
+        removed = st.session_state.removed_template_rows
+        if removed:
+            undo_row = st.container(horizontal=True, vertical_alignment="center", gap="small")
+            html(f'<p class="calc" style="margin:0;">Removed when you save: {", ".join(r["name"] for r in removed)}.</p>', undo_row)
+            if undo_row.button("Undo", key="undo_tmpl_remove"):
+                st.session_state.template_rows = sorted(st.session_state.template_rows + removed, key=lambda r: r["name"])
+                st.session_state.removed_template_rows = []
                 st.rerun()
 
         actions = st.container(horizontal=True, gap="small")
@@ -1300,6 +1379,9 @@ def render_recurring_bills_section():
             st.rerun()
 
         if actions.button("Save recurring bills", type="primary"):
+            for row in st.session_state.removed_template_rows:
+                db.deactivate_bill_template(row["id"])
+            st.session_state.removed_template_rows = []
             for row in st.session_state.template_rows:
                 lid = row["local_id"]
                 name = st.session_state[f"tmpl_name_{lid}"]
