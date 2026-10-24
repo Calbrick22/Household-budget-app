@@ -5,16 +5,39 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { startMonth } from "@/app/actions";
 import { MONTHS } from "@/lib/format";
+import { Sheet } from "./sheet";
 
-export function MonthPicker({ options, current }: { options: { id: number; label: string }[]; current: number }) {
+/** The month's name is the picker: tap the title and every month slides up to choose from. */
+export function MonthPicker({ options, current, title }: {
+  options: { id: number; label: string; confirmed: boolean; note: string }[]; current: number; title: string;
+}) {
   const router = useRouter();
   return (
-    <select
-      className="select" aria-label="Choose a month" value={current} style={{ width: 210 }}
-      onChange={(e) => router.push(`/?month=${e.target.value}`)}
+    <Sheet
+      title="Choose a month"
+      trigger={(open) => (
+        <h1 className="title-picker">
+          <button type="button" onClick={open} aria-haspopup="dialog" aria-label={`${title}, choose a month`}>
+            {title}
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+        </h1>
+      )}
     >
-      {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-    </select>
+      {(close) => (
+        <ul className="month-list" role="list">
+          {options.map((o) => (
+            <li key={o.id}>
+              <a href={`/?month=${o.id}`} aria-current={o.id === current ? "true" : undefined}
+                onClick={(e) => { e.preventDefault(); close(); if (o.id !== current) router.push(`/?month=${o.id}`); }}>
+                <span><b>{o.label}</b><span className="small muted">{o.note}</span></span>
+                <span className={`pill ${o.confirmed ? "confirmed" : "draft"}`}>{o.confirmed ? "Confirmed" : "Draft"}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Sheet>
   );
 }
 
