@@ -7,6 +7,11 @@ import { requireSession } from "@/lib/session";
 import { MonthEditor } from "@/components/month-editor";
 import { Toast } from "@/components/month-controls";
 
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const m = await db.getMonth(Number((await params).id));
+  return { title: m ? `Edit ${monthLabel(m)}` : "Month not found" };
+}
+
 export default async function EditMonth({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
   const id = Number((await params).id);

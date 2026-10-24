@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { hasSession } from "@/lib/session";
 import { LoginForm } from "./login-form";
 
+export const metadata = { title: "Unlock" }; // taste-skill-ignore: the page title names the action
+
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {

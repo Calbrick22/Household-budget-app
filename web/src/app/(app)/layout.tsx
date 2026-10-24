@@ -28,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await requireSession();
   return (
     <div className="shell">
+      <a className="skip" href="#main">Skip to content</a>
       <aside className="sidebar">
         <Brand />
         <SideNav />
@@ -35,7 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </aside>
       <div>
         <header className="topbar"><Brand /><LockButton /></header>
-        <main className="canvas">{children}</main>
+        <main className="canvas" id="main" tabIndex={-1}>{children}</main>
       </div>
       <TabBar />
     </div>

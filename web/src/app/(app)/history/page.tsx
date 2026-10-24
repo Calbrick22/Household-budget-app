@@ -8,6 +8,8 @@ import { StatusPill } from "@/components/money";
 import { AddMonthMenu, Toast } from "@/components/month-controls";
 import { DeleteMonth } from "@/components/delete-month";
 
+export const metadata = { title: "History" };
+
 export default async function History() {
   await requireSession();
   const [all, live] = await Promise.all([db.getAllFinancials(), db.getSettings()]);
@@ -47,7 +49,7 @@ export default async function History() {
                     <td className="hide-phone">{money(Math.max(r.calToJoint, 0))}</td>
                     <td className="hide-phone">{money(Math.max(r.daniToJoint, 0))}</td>
                     <td>
-                      <span className="inline" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                      <span className="row-actions">
                         <Link className="btn" href={`/?month=${f.month.id}`}>Open</Link>
                         <DeleteMonth id={f.month.id} label={label} />
                       </span>

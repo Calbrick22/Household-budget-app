@@ -13,7 +13,7 @@ export function DeleteMonth({ id, label }: { id: number; label: string }) {
   const ref = useRef<HTMLDialogElement>(null);
   return (
     <>
-      <button className="btn danger" type="button" onClick={() => ref.current?.showModal()} aria-label={`Delete ${label}`}>Delete</button>
+      <button className="btn ghost danger" type="button" onClick={() => ref.current?.showModal()} aria-label={`Delete ${label}`}>Delete</button>
       <dialog ref={ref} className="dialog" aria-labelledby={`del-${id}`}>
         <form action={deleteMonth} className="stack" style={{ gap: 16 }}>
           <input type="hidden" name="id" value={id} />

@@ -2,7 +2,8 @@
 // Small SVG charts drawn at the width they are given, so text stays at its real
 // size on a phone. Rules from the tasteskill app chapter: 3-5 quiet gridlines,
 // round ticks above the largest value, 2px straight lines without markers,
-// square bars, a legend only when there are two series or more.
+// square bars, a legend only when there are two series or more. Tapping, hovering
+// or arrowing across a chart shows the exact figures for that month.
 import { useEffect, useRef, useState } from "react";
 import { money } from "@/lib/format";
 
@@ -32,6 +33,44 @@ function ticks(max: number, count = 4): number[] {
 
 const PAD = { top: 10, right: 8, bottom: 26, left: 48 };
 
+/** Which month is being pointed at, by finger, mouse or arrow keys. */
+function usePoint(count: number, xOf: (i: number) => number) {
+  const [at, setAt] = useState<number | null>(null);
+  const nearest = (e: React.PointerEvent<HTMLDivElement>) => {
+    const svg = e.currentTarget.querySelector("svg");
+    if (!svg || !count) return;
+    const x = e.clientX - svg.getBoundingClientRect().left;
+    let best = 0;
+    for (let i = 1; i < count; i++) if (Math.abs(xOf(i) - x) < Math.abs(xOf(best) - x)) best = i;
+    setAt(best);
+  };
+  const props = {
+    tabIndex: 0, role: "group" as const, "aria-label": "Chart. Use the arrow keys to read each month's figures.",
+    onPointerDown: nearest,
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => { if (e.pointerType === "mouse" || at != null) nearest(e); },
+    onPointerLeave: (e: React.PointerEvent<HTMLDivElement>) => { if (e.pointerType === "mouse") setAt(null); },
+    onBlur: () => setAt(null),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        setAt((a) => Math.max(0, Math.min(count - 1, a == null ? (e.key === "ArrowRight" ? 0 : count - 1) : a + (e.key === "ArrowRight" ? 1 : -1))));
+      } else if (e.key === "Escape") setAt(null);
+    },
+  };
+  return [at, props] as const;
+}
+
+function Tip({ x, width, title, rows }: { x: number; width: number; title: string; rows: [string, string, string][] }) {
+  const w = 190;
+  const left = Math.max(0, Math.min(width - w, x - w / 2));
+  return (
+    <div className="tip" style={{ left, width: w }} aria-live="polite">
+      <b>{title}</b>
+      {rows.map(([name, value, color]) => <span key={name}><span><i style={{ background: color }} />{name}</span><b>{value}</b></span>)}
+    </div>
+  );
+}
+
 export interface Series { name: string; values: number[]; color: string }
 
 export function LineChart({ labels, series, suffix = "", height = 220, annotations = [] }: {
@@ -44,8 +83,9 @@ export function LineChart({ labels, series, suffix = "", height = 220, annotatio
   const innerW = Math.max(0, w - PAD.left - PAD.right), innerH = height - PAD.top - PAD.bottom;
   const x = (i: number) => PAD.left + (labels.length <= 1 ? innerW / 2 : (i / (labels.length - 1)) * innerW);
   const y = (v: number) => PAD.top + innerH - (v / top) * innerH;
+  const [at, point] = usePoint(labels.length, x);
   return (
-    <div ref={ref}>
+    <div ref={ref} className="chart-wrap" {...point}>
       {series.length > 1 && <div className="legend">{series.map((s) => <span key={s.name}><i className="line" style={{ background: s.color }} />{s.name}</span>)}</div>}
       {w > 0 && (
         <svg className="chart" width={w} height={height} role="img" aria-label={series.map((s) => `${s.name}: ${s.values.map((v, i) => `${labels[i]} ${v.toFixed(1)}${suffix}`).join(", ")}`).join(". ")}>
@@ -56,6 +96,10 @@ export function LineChart({ labels, series, suffix = "", height = 220, annotatio
               points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")} />
           ))}
           {series[0].values.length === 1 && <circle cx={x(0)} cy={y(series[0].values[0])} r={4} fill={series[0].color} />}
+          {at != null && <g>
+            <line x1={x(at)} x2={x(at)} y1={PAD.top} y2={y(0)} stroke="var(--neutral-light)" />
+            {series.map((s) => <circle key={s.name} cx={x(at)} cy={y(s.values[at])} r={4} fill={s.color} stroke="var(--surface)" strokeWidth={2} />)}
+          </g>}
           {annotations.map((a) => (
             <g key={a.at}>
               <line x1={x(a.at)} x2={x(a.at)} y1={y(0) - 4} y2={PAD.top + 14} stroke="var(--negative)" />
@@ -64,6 +108,7 @@ export function LineChart({ labels, series, suffix = "", height = 220, annotatio
           ))}
         </svg>
       )}
+      {at != null && w > 0 && <Tip x={x(at)} width={w} title={labels[at]} rows={series.map((s) => [s.name, `${s.values[at].toFixed(1)}${suffix}`, s.color])} />}
     </div>
   );
 }
@@ -80,18 +125,21 @@ export function StackedBars({ labels, series, percent = false, height = 220, pou
   const bw = Math.min(56, slot * 0.5);
   const y = (v: number) => PAD.top + innerH - (v / top) * innerH;
   const tick = (t: number) => (percent ? `${t}%` : pounds ? `£${t.toLocaleString("en-GB")}` : String(t));
+  const cxOf = (i: number) => PAD.left + slot * i + slot / 2;
+  const [at, point] = usePoint(labels.length, cxOf);
+  const shown = (s: Series, i: number) => (percent ? `${totals[i] ? Math.round((s.values[i] / totals[i]) * 100) : 0}%  ${money(s.values[i])}` : money(s.values[i]));
   return (
-    <div ref={ref}>
-      <div className="legend">{series.map((s) => <span key={s.name}><i style={{ background: s.color }} />{s.name}</span>)}</div>
+    <div ref={ref} className="chart-wrap" {...point}>
+      {series.length > 1 && <div className="legend">{series.map((s) => <span key={s.name}><i style={{ background: s.color }} />{s.name}</span>)}</div>}
       {w > 0 && (
         <svg className="chart" width={w} height={height} role="img"
           aria-label={labels.map((l, i) => `${l}: ${series.map((s) => `${s.name} ${percent && totals[i] ? Math.round(s.values[i] / totals[i] * 100) + "%" : money(s.values[i])}`).join(", ")}`).join(". ")}>
           {ys.map((t) => <g key={t}><line x1={PAD.left} x2={w - PAD.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? "var(--neutral-light)" : "var(--grid)"} /><text x={PAD.left - 8} y={y(t) + 4} textAnchor="end">{tick(t)}</text></g>)}
           {labels.map((l, i) => {
-            const cx = PAD.left + slot * i + slot / 2;
+            const cx = cxOf(i);
             let acc = 0;
             return (
-              <g key={l + i}>
+              <g key={l + i} opacity={at != null && at !== i ? 0.45 : 1}>
                 {series.map((s) => {
                   const v = percent ? (totals[i] ? (s.values[i] / totals[i]) * 100 : 0) : s.values[i];
                   const y0 = y(acc), y1 = y(acc + v);
@@ -104,6 +152,8 @@ export function StackedBars({ labels, series, percent = false, height = 220, pou
           })}
         </svg>
       )}
+      {at != null && w > 0 && <Tip x={cxOf(at)} width={w} title={labels[at]}
+        rows={[...series.map((s): [string, string, string] => [s.name, shown(s, at), s.color]), ...(series.length > 1 && !percent ? [["Total", money(totals[at]), "transparent"] as [string, string, string]] : [])]} />}
     </div>
   );
 }
@@ -127,7 +177,7 @@ export function MoneyFlow(d: FlowData) {
   if (narrow) {
     const bar = (parts: { name: string; value: number; color: string }[], total: number) => (
       <>
-        <div className="track" style={{ height: 14, margin: "6px 0 10px" }}>{parts.filter((p) => p.value > 0).map((p) => <span key={p.name} style={{ width: `${(p.value / total) * 100}%`, background: p.color, borderRight: "2px solid #fff" }} />)}</div>
+        <div className="track" style={{ height: 14, margin: "6px 0 10px" }}>{parts.filter((p) => p.value > 0).map((p) => <span key={p.name} style={{ width: `${(p.value / total) * 100}%`, background: p.color, borderRight: "2px solid var(--surface)" }} />)}</div>
         {parts.map((p) => <div key={p.name} className="row" style={{ padding: "6px 0" }}><span><span className="dot" style={{ background: p.color }} />{p.name}</span><span className="amt">{money(p.value)}</span></div>)}
       </>
     );

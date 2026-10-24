@@ -11,6 +11,19 @@ import { Row } from "./money";
 import { IconClose, IconPlus } from "./icons";
 
 const toNumber = (s: string) => { const n = Number(String(s).replace(/[£,%\s]/g, "")); return Number.isFinite(n) ? n : NaN; };
+const selectAll = (e: React.FocusEvent<HTMLInputElement>) => { const el = e.currentTarget; window.setTimeout(() => el.select(), 0); };
+
+/** A number field that says what's wrong right under itself. */
+function NumberField({ id, label, value, set, problem }: { id: string; label: string; value: string; set: (v: string) => void; problem: string | null }) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input id={id} className="input num" inputMode="decimal" value={value} onFocus={selectAll} onChange={(e) => set(e.target.value)}
+        aria-invalid={problem ? true : undefined} aria-describedby={problem ? `${id}-error` : undefined} />
+      {problem && <p id={`${id}-error`} className="field-error">{problem}</p>}
+    </div>
+  );
+}
 
 export interface PreviewMonth {
   label: string; confirmed: boolean;
@@ -39,9 +52,12 @@ export function SettingsForm({ settings, preview }: { settings: Settings; previe
   return (
     <section className="card">
       <div className="fields-3">
-        <div className="field"><label htmlFor="allowance">Allowance per person (£)</label><input id="allowance" className="input num" inputMode="decimal" value={allowance} onChange={(e) => setAllowance(e.target.value)} /></div>
-        <div className="field"><label htmlFor="rate">Joint savings rate (%)</label><input id="rate" className="input num" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} /></div>
-        <div className="field"><label htmlFor="target">Easy-access target (£)</label><input id="target" className="input num" inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} /></div>
+        <NumberField id="allowance" label="Allowance per person (£)" value={allowance} set={setAllowance}
+          problem={Number.isNaN(a) ? "Enter an amount, like 250.00" : a < 0 ? "Can't be negative" : null} />
+        <NumberField id="rate" label="Joint savings rate (%)" value={rate} set={setRate}
+          problem={Number.isNaN(r) ? "Enter a percentage, like 30" : r < 0 || r > 1 ? "Between 0 and 100" : null} />
+        <NumberField id="target" label="Easy-access target (£)" value={target} set={setTarget}
+          problem={Number.isNaN(t) ? "Enter an amount, like 5000.00" : t < 0 ? "Can't be negative" : null} />
       </div>
       {preview && (
         <div className="preview">
@@ -59,7 +75,7 @@ export function SettingsForm({ settings, preview }: { settings: Settings; previe
         </div>
       )}
       <div className="inline" style={{ marginTop: 16 }}>
-        <button className="btn primary" type="button" disabled={pending || !changed || typeof result === "string"}
+        <button className="btn primary" type="button" disabled={pending || !changed || typeof result === "string" || [a, r, t].some(Number.isNaN) || a < 0 || t < 0 || r < 0 || r > 1}
           onClick={() => start(async () => {
             try {
               await saveSettings({ allowancePerPerson: a, savingsRate: r, easyAccessTarget: t });
@@ -106,7 +122,7 @@ export function RecurringBills({ templates }: { templates: Template[] }) {
       )}
       <div className="inline" style={{ marginTop: 16 }}>
         <button className="btn" type="button" onClick={() => setRows((rs) => [...rs, { key: `n${++n}`, id: null, name: "", amount: "0.00", tag: "Joint", original: null }])}><IconPlus />Add recurring bill</button>
-        <button className="btn primary" type="button" disabled={pending || !dirty} onClick={() => start(async () => {
+        <button className="btn primary" type="button" disabled={pending || !dirty || rows.some((x) => Number.isNaN(toNumber(x.amount)))} onClick={() => start(async () => {
           try {
             await saveTemplates(rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: toNumber(r.amount) || 0, tag: r.tag })), removed.map((r) => r.id!));
             setRemoved([]);
@@ -123,13 +139,15 @@ function RowInputs({ r, onChange, onRemove }: { r: TRow; onChange: (p: Partial<T
   return (
     <>
       <input className="input name" aria-label="Bill name" placeholder="Bill name" value={r.name} onChange={(e) => onChange({ name: e.target.value })} />
-      <input className="input num" aria-label={`Usual amount for ${r.name || "new bill"}`} inputMode="decimal" value={r.amount}
+      <input className="input num" aria-label={`Usual amount for ${r.name || "new bill"}`} inputMode="decimal" value={r.amount} onFocus={selectAll}
+        aria-invalid={Number.isNaN(toNumber(r.amount)) || undefined}
         onChange={(e) => onChange({ amount: e.target.value })}
         onBlur={() => { const v = toNumber(r.amount); if (!Number.isNaN(v)) onChange({ amount: v.toFixed(2) }); }} />
       <select className="select" aria-label={`Whose bill is ${r.name || "the new bill"}`} value={r.tag} onChange={(e) => onChange({ tag: e.target.value as Tag })}>
         {TAGS.map((t) => <option key={t}>{t}</option>)}
       </select>
       <button className="btn icon ghost" type="button" onClick={onRemove} aria-label={`Remove ${r.name || "this bill"}`} title="Remove from future months when you save"><IconClose /></button>
+      {Number.isNaN(toNumber(r.amount)) && <p className="field-error">Enter an amount for {r.name || "this bill"}, like 45.00</p>}
     </>
   );
 }

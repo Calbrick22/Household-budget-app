@@ -5,6 +5,8 @@ import { Suspense } from "react";
 import { RecurringBills, SettingsForm } from "@/components/settings-forms";
 import { Toast } from "@/components/month-controls";
 
+export const metadata = { title: "Settings" };
+
 export default async function SettingsPage() {
   await requireSession();
   const [settings, templates, all] = await Promise.all([db.getSettings(), db.getActiveTemplates(), db.getAllFinancials()]);
