@@ -95,7 +95,7 @@ function FlowNode({ i, active, go, total }: { i: number; active: number; go: (i:
   );
 }
 
-function FlowArrow({ value, weight, who, dir }: { value: number; weight: number; who: "cal" | "dani"; dir: "left" | "right" }) {
+export function FlowArrow({ value, weight, who, dir }: { value: number; weight: number; who: "cal" | "dani"; dir: "left" | "right" }) {
   return (
     <div className={`flow-arrow ${who} ${dir}`} aria-hidden="true" style={{ "--w": `${weight}px` } as React.CSSProperties}>
       <span className="flow-amt">{money(Math.max(value, 0))}</span>

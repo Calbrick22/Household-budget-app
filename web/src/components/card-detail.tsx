@@ -54,7 +54,7 @@ export function CardDetail({ label, title, subtitle, avatar, card, children }: {
   const onDown = (e: React.PointerEvent) => {
     if (e.pointerType === "mouse" || (e.target as HTMLElement).closest("button")) return;
     drag.current = { y: e.clientY, dy: 0 };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
   };
   const onMove = (e: React.PointerEvent) => {
     if (!drag.current || !dlg.current) return;

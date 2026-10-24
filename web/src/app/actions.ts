@@ -45,7 +45,7 @@ export async function startMonth(form: FormData): Promise<void> {
     throw new Error("Choose a month and a year between 2000 and 2100.");
   }
   const id = await db.getOrCreateMonth(year, month);
-  redirect(`/month/${id}/edit`);
+  redirect(`/?month=${id}&checkin=1`);
 }
 
 export async function saveMonth(input: db.MonthSave): Promise<{ ok: true }> {
@@ -86,10 +86,10 @@ export async function saveSettings(input: db.Settings): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string }[], removedIds: number[]): Promise<{ ok: true }> {
+export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean }[], removedIds: number[]): Promise<{ ok: true }> {
   await requireSession();
   await db.saveTemplates(
-    rows.map((r) => ({ id: r.id ? Number(r.id) : null, name: String(r.name), defaultAmount: money(r.defaultAmount, "Amount"), tag: String(r.tag) })),
+    rows.map((r) => ({ id: r.id ? Number(r.id) : null, name: String(r.name), defaultAmount: money(r.defaultAmount, "Amount"), tag: String(r.tag), varies: Boolean(r.varies) })),
     removedIds.map(Number),
   );
   revalidatePath("/", "layout");
