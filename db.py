@@ -98,7 +98,22 @@ SCHEMA_STATEMENTS = [
         amount NUMERIC NOT NULL DEFAULT 0
     )
     """,
+    # The settings a month was confirmed with, so confirmed months keep their
+    # figures when the settings change later. NULL on drafts, which follow the
+    # live settings.
+    "ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_allowance_per_person NUMERIC",
+    "ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_savings_rate NUMERIC",
+    "ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_easy_access_target NUMERIC",
 ]
+
+# Copies the live settings onto a month. Used when a month is confirmed, and
+# once to freeze months confirmed before months carried their own settings.
+_FREEZE_SETTINGS_SQL = """
+    UPDATE months SET
+        settings_allowance_per_person = (SELECT value::numeric FROM settings WHERE key = 'allowance_per_person'),
+        settings_savings_rate = (SELECT value::numeric FROM settings WHERE key = 'savings_rate'),
+        settings_easy_access_target = (SELECT value::numeric FROM settings WHERE key = 'easy_access_target')
+"""
 
 
 def init_db():
@@ -122,6 +137,12 @@ def _ensure_initialized():
                 ),
                 {"key": key, "value": value},
             )
+        s.commit()
+
+    # Months confirmed before settings were frozen take the settings in force
+    # now - the ones their figures have been shown with - and keep them.
+    with conn.session as s:
+        s.execute(text(_FREEZE_SETTINGS_SQL + " WHERE confirmed AND settings_allowance_per_person IS NULL"))
         s.commit()
 
     templates = conn.query("SELECT id FROM bill_templates", ttl=5)
@@ -294,12 +315,24 @@ def get_month(month_id: int):
 
 
 def set_month_confirmed(month_id: int, confirmed: bool):
+    """Confirming a month also freezes the settings it was calculated with;
+    turning it back into a draft lets it follow the live settings again."""
     conn = get_conn()
     with conn.session as s:
         s.execute(
             text("UPDATE months SET confirmed = :confirmed WHERE id = :id"),
             {"confirmed": confirmed, "id": month_id},
         )
+        if confirmed:
+            s.execute(text(_FREEZE_SETTINGS_SQL + " WHERE id = :id"), {"id": month_id})
+        else:
+            s.execute(
+                text(
+                    "UPDATE months SET settings_allowance_per_person = NULL, settings_savings_rate = NULL, "
+                    "settings_easy_access_target = NULL WHERE id = :id"
+                ),
+                {"id": month_id},
+            )
         s.commit()
         st.cache_data.clear()
 
@@ -328,10 +361,13 @@ def delete_month(month_id: int):
 def get_bill_entries(month_id: int):
     conn = get_conn()
     rows = conn.query(
-        "SELECT id, name, amount, tag FROM bill_entries WHERE month_id = :mid ORDER BY name",
+        "SELECT id, name, amount, tag, template_id FROM bill_entries WHERE month_id = :mid ORDER BY name",
         params={"mid": month_id}, ttl=5,
     )
-    return rows.to_dict("records")
+    records = rows.to_dict("records")
+    for r in records:
+        r["template_id"] = None if _is_null(r["template_id"]) else int(r["template_id"])
+    return records
 
 
 def add_bill_entry(month_id: int, name: str, amount: float, tag: str) -> int:
@@ -352,7 +388,7 @@ def add_bill_entry(month_id: int, name: str, amount: float, tag: str) -> int:
     return int(new_id)
 
 
-def update_bill_entry(entry_id: int, name: str, amount: float, tag: str):
+def update_bill_entry(entry_id: int, name: str, amount: float, tag: str, carry_forward: bool = True):
     if tag not in VALID_TAGS:
         raise ValueError(f"tag must be one of {VALID_TAGS}")
     conn = get_conn()
@@ -361,14 +397,13 @@ def update_bill_entry(entry_id: int, name: str, amount: float, tag: str):
             text("UPDATE bill_entries SET name = :name, amount = :amount, tag = :tag WHERE id = :id"),
             {"name": name, "amount": amount, "tag": tag, "id": entry_id},
         )
-        # If this bill traces back to a recurring template, keep the
-        # template in sync so future months pick up the change too -
-        # this is what lets editing a bill in Month Entry (e.g. the water
-        # bill going up) carry forward automatically.
+        # If this bill traces back to a recurring template and the change
+        # should carry forward, keep the template in sync so future months
+        # pick up the change too (e.g. the water bill going up).
         template_row = s.execute(
             text("SELECT template_id FROM bill_entries WHERE id = :id"), {"id": entry_id}
         ).fetchone()
-        if template_row and template_row[0] is not None:
+        if carry_forward and template_row and template_row[0] is not None:
             s.execute(
                 text(
                     "UPDATE bill_templates SET name = :name, default_amount = :amount, tag = :tag "
@@ -388,6 +423,11 @@ def delete_bill_entry(entry_id: int):
         st.cache_data.clear()
 
 
+def _is_null(value) -> bool:
+    """SQL NULL arrives from pandas as None or NaN depending on the column."""
+    return value is None or value != value
+
+
 def get_month_financials(month_id: int):
     """One round-trip for everything calculate_month() and the Transfers
     section need, instead of four separate queries."""
@@ -396,6 +436,7 @@ def get_month_financials(month_id: int):
         """
         SELECT
             m.id, m.year, m.month, m.confirmed, m.current_easy_access_balance,
+            m.settings_allowance_per_person, m.settings_savings_rate, m.settings_easy_access_target,
             COALESCE((SELECT SUM(amount) FROM income_entries
                       WHERE month_id = m.id AND person = 'Cal'), 0) AS cal_income,
             COALESCE((SELECT SUM(amount) FROM income_entries
@@ -421,6 +462,12 @@ def get_month_financials(month_id: int):
         "cal_income": float(r["cal_income"]), "dani_income": float(r["dani_income"]),
         "bills_total": float(r["bills_total"]),
         "cal_bills": float(r["cal_bills"]), "dani_bills": float(r["dani_bills"]),
+        # The settings frozen when the month was confirmed; None on drafts.
+        "frozen_settings": None if _is_null(r["settings_allowance_per_person"]) else {
+            "allowance_per_person": float(r["settings_allowance_per_person"]),
+            "savings_rate": float(r["settings_savings_rate"]),
+            "easy_access_target": float(r["settings_easy_access_target"]),
+        },
     }
 
 
