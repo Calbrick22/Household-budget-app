@@ -9,6 +9,7 @@ import { calculateWaterfall, type WaterfallResult } from "@/lib/calculations";
 import type { BillEntry, Settings, Tag } from "@/lib/db";
 import { money, pct, ratePct } from "@/lib/format";
 import { saveMonth } from "@/app/actions";
+import { confirmLeave, setUnsaved } from "@/lib/leave-guard";
 import { Avatar, Row } from "./money";
 import { IconClose, IconPlus } from "./icons";
 
@@ -43,6 +44,8 @@ const toNumber = (s: string) => {
   return Number.isFinite(n) ? n : NaN;
 };
 const fixed = (n: number) => n.toFixed(2);
+// Tapping an amount selects it, so typing replaces it rather than adding to it.
+const selectAll = (e: React.FocusEvent<HTMLInputElement>) => { const el = e.currentTarget; window.setTimeout(() => el.select(), 0); };
 let counter = 0;
 const newKey = () => `new-${++counter}`;
 
@@ -71,10 +74,11 @@ export function MonthEditor(p: EditorProps) {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
+    setUnsaved(dirty);
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    return () => { window.removeEventListener("beforeunload", warn); setUnsaved(false); };
   }, [dirty]);
 
   const touch = <T,>(set: (v: T) => void) => (v: T) => { set(v); setDirty(true); };
@@ -114,7 +118,11 @@ export function MonthEditor(p: EditorProps) {
 
   function save(finish: boolean) {
     setError(null);
-    if (typeof preview === "string") { setError(preview); return; }
+    if (typeof preview === "string") {
+      setError(preview);
+      document.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus();
+      return;
+    }
     startTransition(async () => {
       try {
         await saveMonth({
@@ -127,7 +135,7 @@ export function MonthEditor(p: EditorProps) {
         });
         setDirty(false);
         if (finish || p.confirmed) {
-          router.push(`/?month=${p.monthId}&saved=${encodeURIComponent(finish ? `${p.monthName} is confirmed.` : "Changes saved.")}`);
+          router.push(finish ? `/?month=${p.monthId}&finished=1` : `/?month=${p.monthId}&saved=${encodeURIComponent("Changes saved.")}`);
         } else {
           router.replace(`/month/${p.monthId}/edit?saved=${encodeURIComponent("Draft saved.")}`, { scroll: false });
           router.refresh();
@@ -138,18 +146,21 @@ export function MonthEditor(p: EditorProps) {
     });
   }
 
-  const money2 = (v: string, set: (v: string) => void) => ({
-    value: v, inputMode: "decimal" as const, className: "input num",
+  const money2 = (id: string, v: string, set: (v: string) => void) => ({
+    id, value: v, inputMode: "decimal" as const, className: "input num", onFocus: selectAll,
+    "aria-invalid": Number.isNaN(toNumber(v)) || undefined, "aria-describedby": Number.isNaN(toNumber(v)) ? `${id}-error` : undefined,
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => touch(set)(e.target.value),
     onBlur: () => { const n = toNumber(v); if (!Number.isNaN(n)) set(fixed(n)); },
   });
+  const fieldError = (id: string, v: string) => Number.isNaN(toNumber(v)) && <p id={`${id}-error`} className="field-error">Enter an amount, like 1250.00</p>;
+  const transfers = typeof preview === "string" ? null : preview;
 
   return (
     <>
       <div className="title-row">
         <div className="title"><h1>Edit {p.monthName}</h1>{p.confirmed ? <span className="pill confirmed">Confirmed</span> : <span className="pill draft">Draft</span>}</div>
         <div className="actions">
-          <Link className="btn" href={`/?month=${p.monthId}`} onClick={(e) => { if (dirty && !confirm("Leave without saving your changes?")) e.preventDefault(); }}>Back to {p.shortName}</Link>
+          <Link className="btn" href={`/?month=${p.monthId}`} onClick={(e) => { if (!confirmLeave()) e.preventDefault(); }}>Back to {p.shortName}</Link>
         </div>
       </div>
       <p className="finding" style={p.confirmed ? { color: "var(--warning-ink)" } : { color: "var(--muted)" }}>
@@ -194,12 +205,12 @@ export function MonthEditor(p: EditorProps) {
             <div className="income-grid">
               <div className="stack" style={{ gap: 12 }}>
                 <span className="person-head"><Avatar who="Cal" small />Cal</span>
-                <div className="field"><label htmlFor="cal-salary">Salary (£)</label><input id="cal-salary" {...money2(calSalary, setCalSalary)} /></div>
-                <div className="field"><label htmlFor="cal-raf">RAF (£)</label><input id="cal-raf" {...money2(calRaf, setCalRaf)} /></div>
+                <div className="field"><label htmlFor="cal-salary">Salary (£)</label><input {...money2("cal-salary", calSalary, setCalSalary)} />{fieldError("cal-salary", calSalary)}</div>
+                <div className="field"><label htmlFor="cal-raf">RAF (£)</label><input {...money2("cal-raf", calRaf, setCalRaf)} />{fieldError("cal-raf", calRaf)}</div>
               </div>
               <div className="stack" style={{ gap: 12 }}>
                 <span className="person-head"><Avatar who="Dani" small />Dani</span>
-                <div className="field"><label htmlFor="dani-income">Income (£)</label><input id="dani-income" {...money2(daniIncome, setDaniIncome)} /></div>
+                <div className="field"><label htmlFor="dani-income">Income (£)</label><input {...money2("dani-income", daniIncome, setDaniIncome)} />{fieldError("dani-income", daniIncome)}</div>
               </div>
             </div>
           </section>
@@ -208,7 +219,8 @@ export function MonthEditor(p: EditorProps) {
             <div className="lane-head" style={{ margin: 0 }}><Avatar who="Joint" small /><h2 id="easy-h">Easy-access pot</h2></div>
             <div className="field" style={{ marginTop: 12 }}>
               <label htmlFor="easy">Balance at the start of this month (£)</label>
-              <input id="easy" {...money2(easy, setEasy)} />
+              <input {...money2("easy", easy, setEasy)} />
+              {fieldError("easy", easy)}
             </div>
             {p.suggestion && Math.abs(p.suggestion.balance + p.suggestion.added - (toNumber(easy) || 0)) >= 0.005 && (
               <div className="inline" style={{ marginTop: 12 }}>
@@ -226,11 +238,20 @@ export function MonthEditor(p: EditorProps) {
         <div className="sticky stack" style={{ gap: 16 }}>
           <Preview preview={preview} />
           {error && <p className="alert bad" role="alert">{error}</p>}
-          <div className="grid-2" style={{ gap: 8 }}>
-            <button className="btn" type="button" disabled={pending} onClick={() => save(false)}>{pending ? "Saving…" : "Save draft"}</button>
-            <button className="btn primary" type="button" disabled={pending} onClick={() => save(!p.confirmed)}>
-              {p.confirmed ? "Save changes" : "Finish month"}
-            </button>
+          <div className="save-bar">
+            {transfers && (
+              <p className="save-bar-sum" aria-hidden="true">
+                <span><span className="dot" style={{ background: "var(--cal-mid)" }} />Cal <b>{money(Math.max(transfers.calToJoint, 0))}</b></span>
+                <span><span className="dot" style={{ background: "var(--dani-mid)" }} />Dani <b>{money(Math.max(transfers.daniToJoint, 0))}</b></span>
+                <span className="muted">to joint</span>
+              </p>
+            )}
+            <div className="save-bar-buttons">
+              <button className="btn" type="button" disabled={pending} onClick={() => save(false)}>{pending ? "Saving…" : p.confirmed ? "Save" : "Save draft"}</button>
+              <button className="btn primary" type="button" disabled={pending} onClick={() => save(!p.confirmed)}>
+                {p.confirmed ? "Save changes" : "Finish month"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -240,12 +261,14 @@ export function MonthEditor(p: EditorProps) {
 
 function BillInputs({ row, onChange, onRemove }: { row: BillRow; onChange: (p: Partial<BillRow>) => void; onRemove: () => void }) {
   const isChanged = changed(row);
+  const bad = Number.isNaN(toNumber(row.amount));
   return (
     <>
       <input className={`input name${isChanged && row.name !== row.original?.name ? " changed" : ""}`} aria-label="Bill name" placeholder="Bill name"
         value={row.name} onChange={(e) => onChange({ name: e.target.value })} />
       <input className={`input num${isChanged && Math.abs((toNumber(row.amount) || 0) - (row.original?.amount ?? 0)) >= 0.005 ? " changed" : ""}`}
-        aria-label={`Amount for ${row.name || "new bill"}`} inputMode="decimal" value={row.amount}
+        aria-label={`Amount for ${row.name || "new bill"}`} inputMode="decimal" value={row.amount} onFocus={selectAll}
+        aria-invalid={bad || undefined} aria-describedby={bad ? `${row.key}-error` : undefined}
         onChange={(e) => onChange({ amount: e.target.value })}
         onBlur={() => { const n = toNumber(row.amount); if (!Number.isNaN(n)) onChange({ amount: fixed(n) }); }} />
       <select className={`select${isChanged && row.tag !== row.original?.tag ? " changed" : ""}`} aria-label={`Whose bill is ${row.name || "the new bill"}`}
@@ -253,6 +276,7 @@ function BillInputs({ row, onChange, onRemove }: { row: BillRow; onChange: (p: P
         {TAGS.map((t) => <option key={t}>{t}</option>)}
       </select>
       <button className="btn icon ghost" type="button" onClick={onRemove} aria-label={`Remove ${row.name || "this bill"}`} title="Remove when you save"><IconClose /></button>
+      {bad && <p id={`${row.key}-error`} className="field-error">Enter an amount for {row.name || "this bill"}, like 45.00</p>}
     </>
   );
 }

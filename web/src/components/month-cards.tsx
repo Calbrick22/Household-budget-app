@@ -1,9 +1,18 @@
-// The cards of the month screen: Cal, Joint and Dani side by side, then the
-// working, the easy-access pot, the comparison and the settings used.
+// The cards of the month screen: Cal, Joint and Dani side by side, what each
+// opens into, the working, the comparison and the settings used.
 import type { WaterfallResult } from "@/lib/calculations";
-import type { Settings } from "@/lib/db";
+import type { BillEntry, Settings } from "@/lib/db";
 import { money, pct, ratePct } from "@/lib/format";
-import { Avatar, BigMoney, Row } from "./money";
+import { Avatar, Row } from "./money";
+import { Roll, RollingBig } from "./rolling";
+import { CopyAmount } from "./card-detail";
+import { StackedBars } from "./charts";
+
+/** One month's figures for the small history charts. */
+export interface HistoryPoint {
+  label: string; draft: boolean;
+  calSavings: number; daniSavings: number; easy: number; long: number; balance: number;
+}
 
 export function PersonLane({ r, who }: { r: WaterfallResult; who: "Cal" | "Dani" }) {
   const cal = who === "Cal";
@@ -19,14 +28,14 @@ export function PersonLane({ r, who }: { r: WaterfallResult; who: "Cal" | "Dani"
     <section className="card lane" aria-label={`${who}'s account`}>
       <div className="lane-head"><Avatar who={who} /><h2>{who}&apos;s account</h2></div>
       <p className="lane-label">Transferred out, in this order</p>
-      <BigMoney value={Math.max(totalOut, 0)} />
+      <RollingBig value={Math.max(totalOut, 0)} />
       <p className="calc">{money(income)} income − {money(bills)} personal bills</p>
       <ol className="moves">
-        <li><Row label="Joint account" value={money(Math.max(toJoint, 0))} sub={jointSub} /></li>
-        <li><Row label="Personal account" value={money(r.allowancePerPerson)} sub="allowance" /></li>
-        <li><Row label="Personal savings" value={money(savings)} /></li>
+        <li><Row label="Joint account" value={<Roll value={Math.max(toJoint, 0)} />} sub={jointSub} /></li>
+        <li><Row label="Personal account" value={<Roll value={r.allowancePerPerson} />} sub="allowance" /></li>
+        <li><Row label="Personal savings" value={<Roll value={savings} />} /></li>
       </ol>
-      <div className="foot"><Row label="Left in account for personal bills" value={money(bills)} cls="total" /></div>
+      <div className="foot"><Row label="Left in account for personal bills" value={<Roll value={bills} />} cls="total" /></div>
     </section>
   );
 }
@@ -36,14 +45,96 @@ export function JointLane({ r }: { r: WaterfallResult }) {
     <section className="card lane" aria-label="Joint account">
       <div className="lane-head"><Avatar who="Joint" /><h2>Joint account</h2></div>
       <p className="lane-label">Comes in from you both</p>
-      <BigMoney value={r.calToJoint + r.daniToJoint} />
+      <RollingBig value={r.calToJoint + r.daniToJoint} />
       <p className="calc">Cal {money(r.calToJoint)} + Dani {money(r.daniToJoint)}</p>
-      <Row label="Joint bills" value={money(r.jointBillsTotal)} />
-      <Row label="Joint savings" value={money(r.jointSavings)} sub={`${ratePct(r.savingsRate)} of the ${money(Math.max(r.remainder, 0))} left after bills and allowances`} />
-      <Row label="To easy-access pot" value={money(r.toEasyAccess)} cls="indent" />
-      <Row label="To long-term pot" value={money(r.toLongTerm)} cls="indent" />
-      <div className="foot"><Row label="Paid out" value={money(r.jointBillsTotal + r.jointSavings)} cls="total" /></div>
+      <Row label="Joint bills" value={<Roll value={r.jointBillsTotal} />} />
+      <Row label="Joint savings" value={<Roll value={r.jointSavings} />} sub={`${ratePct(r.savingsRate)} of the ${money(Math.max(r.remainder, 0))} left after bills and allowances`} />
+      <Row label="To easy-access pot" value={<Roll value={r.toEasyAccess} />} cls="indent" />
+      <Row label="To long-term pot" value={<Roll value={r.toLongTerm} />} cls="indent" />
+      <div className="foot"><Row label="Paid out" value={<Roll value={r.jointBillsTotal + r.jointSavings} />} cls="total" /></div>
     </section>
+  );
+}
+
+function BillList({ bills, empty }: { bills: BillEntry[]; empty: string }) {
+  if (!bills.length) return <p className="empty small">{empty}</p>;
+  return <>{bills.map((b) => <Row key={b.id} label={b.name} value={money(b.amount)} />)}</>;
+}
+
+/** Everything about one person's month: what to move and where, with each
+ *  amount ready to copy into a banking app. */
+export function PersonDetail({ r, who, income, bills, history }: {
+  r: WaterfallResult; who: "Cal" | "Dani"; income: [string, number][]; bills: BillEntry[]; history: HistoryPoint[];
+}) {
+  const cal = who === "Cal";
+  const toJoint = Math.max(cal ? r.calToJoint : r.daniToJoint, 0);
+  const savings = cal ? r.calPersonalSavings : r.daniPersonalSavings;
+  const own = cal ? r.calPersonalBills : r.daniPersonalBills;
+  const transfers: [string, string, number][] = [
+    ["Joint account", "joint savings and bills", toJoint],
+    ["Personal account", "allowance", r.allowancePerPerson],
+    ["Personal savings", `${pct(cal ? r.calContributionShare : r.daniContributionShare)} of the personal savings`, savings],
+  ];
+  return (
+    <div className="detail-grid">
+      <section className="detail-section">
+        <h3>Transfers to make</h3>
+        <ol className="transfers">
+          {transfers.map(([name, sub, v]) => (
+            <li key={name}>
+              <span><b>{name}</b><span className="sub">{sub}</span></span>
+              <span className="amt">{money(v)}</span>
+              <CopyAmount value={v} what={`${name} amount`} />
+            </li>
+          ))}
+        </ol>
+        <Row label="Stays in the account for personal bills" value={money(own)} cls="total" />
+      </section>
+      <section className="detail-section">
+        <h3>Income</h3>
+        {income.map(([n, v]) => <Row key={n} label={n} value={money(v)} />)}
+        <Row label="Total" value={money(cal ? r.calIncome : r.daniIncome)} cls="total" />
+        <h3 className="detail-gap">Personal bills</h3>
+        <BillList bills={bills} empty={`No personal bills for ${who} this month.`} />
+        {bills.length > 0 && <Row label="Total" value={money(own)} cls="total" />}
+      </section>
+      <section className="detail-section span">
+        <h3>Personal savings, month by month</h3>
+        <p className="calc" style={{ margin: "2px 0 0" }}>The confirmed months up to this one{history.some((h) => h.draft) ? " (this month is still a draft)" : ""}.</p>
+        <StackedBars labels={history.map((h) => h.label)} pounds height={180}
+          series={[{ name: `${who}'s personal savings`, values: history.map((h) => (cal ? h.calSavings : h.daniSavings)), color: cal ? "var(--cal-mid)" : "var(--dani-mid)" }]} />
+      </section>
+    </div>
+  );
+}
+
+export function JointDetail({ r, bills, history }: { r: WaterfallResult; bills: BillEntry[]; history: HistoryPoint[] }) {
+  return (
+    <div className="detail-grid">
+      <section className="detail-section">
+        <h3>Comes in</h3>
+        <Row label="From Cal" value={money(r.calToJoint)} sub={`${pct(r.calContributionShare)} of the pot`} />
+        <Row label="From Dani" value={money(r.daniToJoint)} sub={`${pct(r.daniContributionShare)} of the pot`} />
+        <Row label="Total" value={money(r.calToJoint + r.daniToJoint)} cls="total" />
+        <h3 className="detail-gap">Saved</h3>
+        <Row label={`Joint savings (${ratePct(r.savingsRate)})`} value={money(r.jointSavings)} />
+        <Row label="To easy-access pot" value={money(r.toEasyAccess)} cls="indent" />
+        <Row label="To long-term pot" value={money(r.toLongTerm)} cls="indent" />
+      </section>
+      <section className="detail-section">
+        <h3>Joint bills</h3>
+        <BillList bills={bills} empty="No joint bills this month." />
+        {bills.length > 0 && <Row label="Total" value={money(r.jointBillsTotal)} cls="total" />}
+      </section>
+      <section className="detail-section span">
+        <h3>Joint savings, month by month</h3>
+        <StackedBars labels={history.map((h) => h.label)} pounds height={180}
+          series={[
+            { name: "Easy-access", values: history.map((h) => h.easy), color: "var(--joint-mid)" },
+            { name: "Long-term", values: history.map((h) => h.long), color: "var(--joint)" },
+          ]} />
+      </section>
+    </div>
   );
 }
 
@@ -104,51 +195,11 @@ export function WorkingSteps({ r }: { r: WaterfallResult }) {
   );
 }
 
-/** The three totals the working arrives at, for the card that opens it. */
-export function WorkingSummary({ r }: { r: WaterfallResult }) {
-  return (
-    <>
-      <Row label="Into the joint pot" value={money(r.pot)} sub={`${money(r.totalIncome)} income − ${money(r.calPersonalBills + r.daniPersonalBills)} personal bills`} />
-      <Row label="Left after bills and allowances" value={money(r.remainder)} sub={`− ${money(r.jointBillsTotal)} joint bills − ${money(r.allowanceTotal)} allowances`} />
-      {r.isShortfall
-        ? <Row label="Saved" value={<span style={{ color: "var(--negative)" }}>{money(0)}</span>} sub="a shortfall month saves nothing" />
-        : <Row label="Saved" value={money(r.jointSavings + r.personalSavingsTotal)} sub={`${money(r.jointSavings)} joint · ${money(r.personalSavingsTotal)} personal`} />}
-    </>
-  );
-}
+export type Change = { name: string; now: number; diff: number; bad: boolean };
 
-export function EasyAccess({ r }: { r: WaterfallResult }) {
-  const target = r.easyAccessTarget;
-  const balance = r.currentEasyAccessBalance;
-  if (target <= 0) {
-    return <section className="card"><h2>Easy-access pot</h2><p className="empty">No target set. Add one in Settings.</p></section>;
-  }
-  const before = Math.max(0, Math.min(balance / target, 1)) * 100;
-  const added = Math.max(0, Math.min(r.toEasyAccess / target, 1 - before / 100)) * 100;
-  return (
-    <section className="card">
-      <h2>Easy-access pot</h2>
-      <p className="calc" style={{ margin: "4px 0 0" }}>{money(r.toEasyAccess)} goes in this month, {money(r.toLongTerm)} to the long-term pot.</p>
-      <div className="track" role="img" aria-label={`${money(balance)} of ${money(target)}, plus ${money(r.toEasyAccess)} this month`}>
-        <span style={{ width: `${before}%`, background: "var(--joint-mid)" }} />
-        <span style={{ width: `${added}%`, background: "var(--joint-pale)" }} />
-      </div>
-      <div className="track-ends"><span>{money(balance)} + {money(r.toEasyAccess)}</span><span>{money(target)} target</span></div>
-    </section>
-  );
-}
-
-export function Comparison({ r, prev, prevName }: { r: WaterfallResult; prev: WaterfallResult | null; prevName: string }) {
-  if (!prev) {
-    return <section className="card"><h2>Against last month</h2><p className="empty" style={{ marginTop: 8 }}>No earlier confirmed month to compare with yet.</p></section>;
-  }
-  // Colour only a change in the bad direction; everything else stays grey.
-  const change = (cur: number, before: number, badIfUp: boolean | null) => {
-    const diff = Math.round((cur - before) * 100) / 100;
-    if (Math.abs(diff) < 0.005) return <span className="chg">—</span>;
-    const bad = (badIfUp === true && diff > 0) || (badIfUp === false && diff < 0);
-    return <span className={`chg${bad ? " bad" : ""}`}>{diff > 0 ? "+" : "−"}{money(Math.abs(diff))}</span>;
-  };
+/** Each headline figure against the last confirmed month; a change is "bad"
+ *  only in the direction that hurts (bills up, income or savings down). */
+export function changes(r: WaterfallResult, prev: WaterfallResult): Change[] {
   const lines: [string, number, number, boolean | null][] = [
     ["Income", r.totalIncome, prev.totalIncome, false],
     ["All bills", r.billsTotal, prev.billsTotal, true],
@@ -158,14 +209,26 @@ export function Comparison({ r, prev, prevName }: { r: WaterfallResult; prev: Wa
     ["Personal savings", r.personalSavingsTotal, prev.personalSavingsTotal, false],
     ["Into joint", r.calToJoint + r.daniToJoint, prev.calToJoint + prev.daniToJoint, null],
   ];
+  return lines.map(([name, now, before, badIfUp]) => {
+    const diff = Math.round((now - before) * 100) / 100;
+    return { name, now, diff, bad: (badIfUp === true && diff > 0) || (badIfUp === false && diff < 0) };
+  });
+}
+
+export function ChangeTable({ lines }: { lines: Change[] }) {
   return (
-    <section className="card">
-      <h2>Against {prevName}</h2>
-      <table className="table" style={{ marginTop: 12 }}>
-        <thead><tr><th>Figure</th><th>This month</th><th>Change</th></tr></thead>
-        <tbody>{lines.map(([n, c, p, b]) => <tr key={n}><td>{n}</td><td>{money(c)}</td><td>{change(c, p, b)}</td></tr>)}</tbody>
-      </table>
-    </section>
+    <table className="table" style={{ marginTop: 4 }}>
+      <thead><tr><th>Figure</th><th>This month</th><th>Change</th></tr></thead>
+      <tbody>
+        {lines.map((l) => (
+          <tr key={l.name}>
+            <td>{l.name}</td><td>{money(l.now)}</td>
+            <td>{Math.abs(l.diff) < 0.005 ? <span className="chg">—</span>
+              : <span className={`chg${l.bad ? " bad" : ""}`}>{l.diff > 0 ? "+" : "−"}{money(Math.abs(l.diff))}</span>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

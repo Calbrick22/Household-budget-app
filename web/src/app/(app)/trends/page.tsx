@@ -4,6 +4,8 @@ import { money, monthLabel, monthName, monthShort } from "@/lib/format";
 import { requireSession } from "@/lib/session";
 import { LineChart, MoneyFlow, StackedBars } from "@/components/charts";
 
+export const metadata = { title: "Trends" };
+
 export default async function Trends() {
   await requireSession();
   const [all, live] = await Promise.all([db.getAllFinancials(), db.getSettings()]);
@@ -50,8 +52,8 @@ export default async function Trends() {
         <MoneyFlow
           cal={latest.calIncome} dani={latest.daniIncome}
           outs={[
-            { name: "Bills", value: latest.billsTotal, color: "var(--neutral-dark)", soft: "#e3e6ea" },
-            { name: "Allowances", value: latest.allowanceTotal, color: "var(--neutral-light)", soft: "#eef0f2" },
+            { name: "Bills", value: latest.billsTotal, color: "var(--neutral-dark)", soft: "var(--neutral-soft)" },
+            { name: "Allowances", value: latest.allowanceTotal, color: "var(--neutral-light)", soft: "var(--neutral-softer)" },
             { name: "Cal personal savings", value: latest.calPersonalSavings, color: "var(--cal-mid)", soft: "var(--cal-soft)" },
             { name: "Dani personal savings", value: latest.daniPersonalSavings, color: "var(--dani-mid)", soft: "var(--dani-soft)" },
           ]}
