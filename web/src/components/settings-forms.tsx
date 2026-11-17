@@ -27,6 +27,7 @@ function NumberField({ id, label, value, set, problem }: { id: string; label: st
 export interface PreviewMonth {
   label: string; confirmed: boolean;
   calIncome: number; daniIncome: number; billsTotal: number; calBills: number; daniBills: number; easyAccessBalance: number;
+  calFromPay: number; calFromAccount: number; daniFromAccount: number;
 }
 
 export function SettingsForm({ settings, preview }: { settings: Settings; preview: PreviewMonth | null }) {
@@ -43,7 +44,8 @@ export function SettingsForm({ settings, preview }: { settings: Settings; previe
     try {
       result = calculateWaterfall({ calIncome: preview.calIncome, daniIncome: preview.daniIncome, billsTotal: preview.billsTotal,
         allowancePerPerson: a, savingsRate: r, easyAccessTarget: t, currentEasyAccessBalance: preview.easyAccessBalance,
-        calPersonalBills: preview.calBills, daniPersonalBills: preview.daniBills });
+        calPersonalBills: preview.calBills, daniPersonalBills: preview.daniBills,
+        calFromPay: preview.calFromPay, calFromAccount: preview.calFromAccount, daniFromAccount: preview.daniFromAccount });
     } catch { result = "Check the figures: the rate must be 0-100% and amounts can't be negative."; }
   }
   const changed = a !== settings.allowancePerPerson || Math.abs(r - settings.savingsRate) > 1e-9 || t !== settings.easyAccessTarget;

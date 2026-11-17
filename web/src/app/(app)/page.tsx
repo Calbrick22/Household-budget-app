@@ -127,6 +127,7 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
               {who === "Joint"
                 ? <JointDetail r={r} bills={bills.filter((b) => b.tag === "Joint")} history={history} />
                 : <PersonDetail r={r} who={who} history={history} bills={bills.filter((b) => b.tag === who)}
+                    jointPaid={bills.filter((b) => b.tag === "Joint" && (who === "Cal" ? b.paidFrom === "Cal" || b.paidFrom === "CalPay" : b.paidFrom === "Dani"))}
                     income={who === "Cal" ? [["Salary", income["Cal:Salary"] ?? 0], ["RAF", income["Cal:RAF"] ?? 0]] : [["Income", income["Dani:Income"] ?? 0]]} />}
             </CardDetail>
           ))}

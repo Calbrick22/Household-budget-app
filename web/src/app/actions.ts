@@ -54,7 +54,7 @@ export async function saveMonth(input: db.MonthSave): Promise<{ ok: true }> {
   if (!month) throw new Error("That month no longer exists.");
   await db.saveMonth({
     monthId: month.id,
-    bills: input.bills.map((b) => ({ id: b.id ? Number(b.id) : null, name: String(b.name), amount: money(b.amount, "Amount"), tag: String(b.tag) })),
+    bills: input.bills.map((b) => ({ id: b.id ? Number(b.id) : null, name: String(b.name), amount: money(b.amount, "Amount"), tag: String(b.tag), paidFrom: b.paidFrom ? String(b.paidFrom) : null })),
     removedIds: input.removedIds.map(Number),
     carryForwardIds: input.carryForwardIds.map(Number),
     calSalary: money(input.calSalary, "Salary"),
@@ -86,10 +86,10 @@ export async function saveSettings(input: db.Settings): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean }[], removedIds: number[]): Promise<{ ok: true }> {
+export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean; paidFrom: string | null }[], removedIds: number[]): Promise<{ ok: true }> {
   await requireSession();
   await db.saveTemplates(
-    rows.map((r) => ({ id: r.id ? Number(r.id) : null, name: String(r.name), defaultAmount: money(r.defaultAmount, "Amount"), tag: String(r.tag), varies: Boolean(r.varies) })),
+    rows.map((r) => ({ id: r.id ? Number(r.id) : null, name: String(r.name), defaultAmount: money(r.defaultAmount, "Amount"), tag: String(r.tag), varies: Boolean(r.varies), paidFrom: r.paidFrom ? String(r.paidFrom) : null })),
     removedIds.map(Number),
   );
   revalidatePath("/", "layout");

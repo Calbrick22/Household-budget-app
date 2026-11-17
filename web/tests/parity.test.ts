@@ -34,7 +34,8 @@ const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 21474836
 const pennies = (max: number) => Math.round(rand() * max * 100) / 100;
 const eighths = (max: number) => Math.round(rand() * max * 8) / 8; // exact .125/.375 ties
 
-function randomCase(i: number): Required<WaterfallInput> {
+// The Python model has no bills paid outside the joint account, so those stay at zero here.
+function randomCase(i: number): WaterfallInput {
   const money = i % 3 === 0 ? eighths : pennies;
   const calBills = money(2500), daniBills = money(800), joint = money(3000);
   return {

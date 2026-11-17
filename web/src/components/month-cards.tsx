@@ -7,6 +7,7 @@ import { Avatar, Row } from "./money";
 import { Roll, RollingBig } from "./rolling";
 import { CopyAmount } from "./card-detail";
 import { StackedBars } from "./charts";
+import { paidFromLabel } from "@/lib/paid-from";
 
 /** One month's figures for the small history charts. */
 export interface HistoryPoint {
@@ -20,22 +21,30 @@ export function PersonLane({ r, who }: { r: WaterfallResult; who: "Cal" | "Dani"
   const bills = cal ? r.calPersonalBills : r.daniPersonalBills;
   const toJoint = cal ? r.calToJoint : r.daniToJoint;
   const savings = cal ? r.calPersonalSavings : r.daniPersonalSavings;
-  const totalOut = toJoint + r.allowancePerPerson + savings;
+  const fromPay = cal ? r.calFromPay : 0;
+  const fromAccount = cal ? r.calFromAccount : r.daniFromAccount;
+  const takeHome = cal ? r.calTakeHome : r.daniIncome;
+  const totalOut = Math.max(toJoint, 0) + r.allowancePerPerson + savings;
   const jointSub = toJoint < 0
     ? <span style={{ color: "var(--negative)" }}>would be {money(toJoint)}, see the note above</span>
-    : "joint savings and bills";
+    : fromPay + fromAccount > 0 ? `after the ${money(fromPay + fromAccount)} of joint bills you pay` : "joint savings and bills";
   return (
     <section className="card lane" aria-label={`${who}'s account`}>
       <div className="lane-head"><Avatar who={who} /><h2>{who}&apos;s account</h2></div>
       <p className="lane-label">Transferred out, in this order</p>
       <RollingBig value={Math.max(totalOut, 0)} />
-      <p className="calc">{money(income)} income − {money(bills)} personal bills</p>
+      <p className="calc">
+        {fromPay > 0 ? <>{money(takeHome)} take-home + {money(fromPay)} taken from pay for joint bills</> : <>{money(income)} income</>} − {money(bills)} personal bills
+      </p>
       <ol className="moves">
         <li><Row label="Joint account" value={<Roll value={Math.max(toJoint, 0)} />} sub={jointSub} /></li>
         <li><Row label="Personal account" value={<Roll value={r.allowancePerPerson} />} sub="allowance" /></li>
         <li><Row label="Personal savings" value={<Roll value={savings} />} /></li>
       </ol>
-      <div className="foot"><Row label="Left in account for personal bills" value={<Roll value={bills} />} cls="total" /></div>
+      <div className="foot">
+        {fromAccount > 0 && <Row label="Kept back for joint bills you pay" value={<Roll value={fromAccount} />} />}
+        <Row label={fromAccount > 0 ? "Left in account for bills" : "Left in account for personal bills"} value={<Roll value={bills + fromAccount} />} cls="total" />
+      </div>
     </section>
   );
 }
@@ -47,31 +56,36 @@ export function JointLane({ r }: { r: WaterfallResult }) {
       <p className="lane-label">Comes in from you both</p>
       <RollingBig value={r.calToJoint + r.daniToJoint} />
       <p className="calc">Cal {money(r.calToJoint)} + Dani {money(r.daniToJoint)}</p>
-      <Row label="Joint bills" value={<Roll value={r.jointBillsTotal} />} />
+      <Row label="Joint bills" value={<Roll value={r.jointBillsFromJoint} />}
+        sub={r.jointPaidElsewhere > 0 ? `${money(r.jointBillsTotal)} in all; ${money(r.jointPaidElsewhere)} paid by you directly` : undefined} />
       <Row label="Joint savings" value={<Roll value={r.jointSavings} />} sub={`${ratePct(r.savingsRate)} of the ${money(Math.max(r.remainder, 0))} left after bills and allowances`} />
       <Row label="To easy-access pot" value={<Roll value={r.toEasyAccess} />} cls="indent" />
       <Row label="To long-term pot" value={<Roll value={r.toLongTerm} />} cls="indent" />
-      <div className="foot"><Row label="Paid out" value={<Roll value={r.jointBillsTotal + r.jointSavings} />} cls="total" /></div>
+      <div className="foot"><Row label="Paid out" value={<Roll value={r.jointBillsFromJoint + r.jointSavings} />} cls="total" /></div>
     </section>
   );
 }
 
 function BillList({ bills, empty }: { bills: BillEntry[]; empty: string }) {
   if (!bills.length) return <p className="empty small">{empty}</p>;
-  return <>{bills.map((b) => <Row key={b.id} label={b.name} value={money(b.amount)} />)}</>;
+  return <>{bills.map((b) => <Row key={b.id} label={b.name} value={money(b.amount)} sub={b.paidFrom ? `paid from ${paidFromLabel(b.paidFrom).replace(" (before it hits)", ", before it reaches him")}` : undefined} />)}</>;
 }
 
 /** Everything about one person's month: what to move and where, with each
  *  amount ready to copy into a banking app. */
-export function PersonDetail({ r, who, income, bills, history }: {
-  r: WaterfallResult; who: "Cal" | "Dani"; income: [string, number][]; bills: BillEntry[]; history: HistoryPoint[];
+export function PersonDetail({ r, who, income, bills, jointPaid, history }: {
+  r: WaterfallResult; who: "Cal" | "Dani"; income: [string, number][]; bills: BillEntry[];
+  /** Joint bills this person pays from their own account or pay. */
+  jointPaid: BillEntry[]; history: HistoryPoint[];
 }) {
   const cal = who === "Cal";
+  const fromPay = cal ? r.calFromPay : 0;
+  const fromAccount = cal ? r.calFromAccount : r.daniFromAccount;
   const toJoint = Math.max(cal ? r.calToJoint : r.daniToJoint, 0);
   const savings = cal ? r.calPersonalSavings : r.daniPersonalSavings;
   const own = cal ? r.calPersonalBills : r.daniPersonalBills;
   const transfers: [string, string, number][] = [
-    ["Joint account", "joint savings and bills", toJoint],
+    ["Joint account", fromPay + fromAccount > 0 ? `less the ${money(fromPay + fromAccount)} of joint bills you pay` : "joint savings and bills", toJoint],
     ["Personal account", "allowance", r.allowancePerPerson],
     ["Personal savings", `${pct(cal ? r.calContributionShare : r.daniContributionShare)} of the personal savings`, savings],
   ];
@@ -88,12 +102,22 @@ export function PersonDetail({ r, who, income, bills, history }: {
             </li>
           ))}
         </ol>
-        <Row label="Stays in the account for personal bills" value={money(own)} cls="total" />
+        {fromAccount > 0 && <Row label="Stays in the account for joint bills you pay" value={money(fromAccount)} />}
+        <Row label={fromAccount > 0 ? "Stays in the account for bills" : "Stays in the account for personal bills"} value={money(own + fromAccount)} cls="total" />
+        {jointPaid.length > 0 && (
+          <>
+            <h3 className="detail-gap">Joint bills you pay</h3>
+            <p className="calc" style={{ margin: "0 0 4px" }}>Shared like any joint bill; you pay them, so your transfer into joint is that much smaller.</p>
+            {jointPaid.map((b) => <Row key={b.id} label={b.name} value={money(b.amount)}
+              sub={b.paidFrom === "CalPay" ? "taken from your pay before it reaches you" : "from your account"} />)}
+          </>
+        )}
       </section>
       <section className="detail-section">
         <h3>Income</h3>
-        {income.map(([n, v]) => <Row key={n} label={n} value={money(v)} />)}
-        <Row label="Total" value={money(cal ? r.calIncome : r.daniIncome)} cls="total" />
+        {income.map(([n, v]) => <Row key={n} label={n} value={money(v)} sub={fromPay > 0 && n === "Salary" ? "take-home" : undefined} />)}
+        {fromPay > 0 && <Row label="Taken from pay for joint bills" value={money(fromPay)} sub="added back, as you've paid it" />}
+        <Row label={fromPay > 0 ? "Income for the split" : "Total"} value={money(cal ? r.calIncome : r.daniIncome)} cls="total" />
         <h3 className="detail-gap">Personal bills</h3>
         <BillList bills={bills} empty={`No personal bills for ${who} this month.`} />
         {bills.length > 0 && <Row label="Total" value={money(own)} cls="total" />}
@@ -125,6 +149,12 @@ export function JointDetail({ r, bills, history }: { r: WaterfallResult; bills: 
         <h3>Joint bills</h3>
         <BillList bills={bills} empty="No joint bills this month." />
         {bills.length > 0 && <Row label="Total" value={money(r.jointBillsTotal)} cls="total" />}
+        {r.jointPaidElsewhere > 0 && (
+          <>
+            <Row label="Paid by you directly" value={`−${money(r.jointPaidElsewhere)}`} cls="indent" />
+            <Row label="From the joint account" value={money(r.jointBillsFromJoint)} cls="total" />
+          </>
+        )}
       </section>
       <section className="detail-section span">
         <h3>Joint savings, month by month</h3>
@@ -140,7 +170,7 @@ export function JointDetail({ r, bills, history }: { r: WaterfallResult; bills: 
 
 /** Warnings that must stay in view: a shortfall, and a transfer that would go negative. */
 export function MonthNotes({ r }: { r: WaterfallResult }) {
-  const notes = ([["Cal", r.calToJoint, "his"], ["Dani", r.daniToJoint, "her"]] as const).filter(([, v]) => v < 0);
+  const notes = ([["Cal", r.calToJoint, "his", r.calFromPay + r.calFromAccount], ["Dani", r.daniToJoint, "her", r.daniFromAccount]] as const).filter(([, v]) => v < 0);
   if (!notes.length && !r.isShortfall) return null;
   return (
     <div style={{ marginTop: 12 }}>
@@ -150,7 +180,12 @@ export function MonthNotes({ r }: { r: WaterfallResult }) {
           adjusted automatically - decide how to handle it and re-edit the month if needed.
         </p>
       )}
-      {notes.map(([who, , pronoun]) => (
+      {notes.map(([who, v, pronoun, paid]) => v + paid >= 0 ? (
+        <p key={who} className="alert note" role="alert">
+          {who} has paid {money(paid)} of joint bills directly, {money(-v)} more than {pronoun} transfer into joint this month -
+          move {money(-v)} from the joint account back to {who}.
+        </p>
+      ) : (
         <p key={who} className="alert bad" role="alert">
           {who}&apos;s allowance and savings add up to more than what&apos;s left after {pronoun} own bills this month -
           the joint transfer can&apos;t go negative, so the shortfall needs covering another way.
@@ -166,7 +201,9 @@ export function WorkingSteps({ r }: { r: WaterfallResult }) {
     <>
       <div className="step">
         <p className="step-title">1. Income, less each person&apos;s own bills</p>
-        <Row label="Cal" value={money(r.calRemainder)} sub={`${money(r.calIncome)} income − ${money(r.calPersonalBills)} personal bills`} />
+        <Row label="Cal" value={money(r.calRemainder)} sub={r.calFromPay > 0
+          ? `${money(r.calTakeHome)} take-home + ${money(r.calFromPay)} taken from pay for joint bills − ${money(r.calPersonalBills)} personal bills`
+          : `${money(r.calIncome)} income − ${money(r.calPersonalBills)} personal bills`} />
         <Row label="Dani" value={money(r.daniRemainder)} sub={`${money(r.daniIncome)} income − ${money(r.daniPersonalBills)} personal bills`} />
         <Row label="Into the joint pot" value={money(r.pot)} cls="total" sub={`Cal ${pct(r.calContributionShare)} · Dani ${pct(r.daniContributionShare)}`} />
       </div>
@@ -188,6 +225,16 @@ export function WorkingSteps({ r }: { r: WaterfallResult }) {
         <Row label={`Cal (${pct(r.calContributionShare)})`} value={money(r.calPersonalSavings)} cls="indent" />
         <Row label={`Dani (${pct(r.daniContributionShare)})`} value={money(r.daniPersonalSavings)} cls="indent" />
       </div>
+      {r.jointPaidElsewhere > 0 && (
+        <div className="step">
+          <p className="step-title">4. Joint bills paid outside the joint account</p>
+          {r.calFromPay > 0 && <Row label="From Cal's pay" value={money(r.calFromPay)} />}
+          {r.calFromAccount > 0 && <Row label="From Cal's account" value={money(r.calFromAccount)} />}
+          {r.daniFromAccount > 0 && <Row label="From Dani's account" value={money(r.daniFromAccount)} />}
+          <Row label="So the transfers into joint are smaller by" value={money(r.jointPaidElsewhere)} cls="total"
+            sub={`Cal ${money(r.calFromPay + r.calFromAccount)} · Dani ${money(r.daniFromAccount)}`} />
+        </div>
+      )}
       <p className="calc" style={{ margin: "14px 0 0" }}>
         All bills this month: {money(r.billsTotal)} (Cal {money(r.calPersonalBills)}, Dani {money(r.daniPersonalBills)}, joint {money(r.jointBillsTotal)}).
       </p>
