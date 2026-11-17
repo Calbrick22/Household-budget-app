@@ -8,6 +8,8 @@ import { Pool, type PoolClient } from "pg";
 export const VALID_TAGS = ["Joint", "Cal", "Dani"] as const;
 export type Tag = (typeof VALID_TAGS)[number];
 export const VALID_PEOPLE = ["Cal", "Dani"] as const;
+import { PAID_FROM, type PaidFrom } from "./paid-from";
+export type { PaidFrom };
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   allowance_per_person: "250",
@@ -53,6 +55,10 @@ const SCHEMA = [
   // Recurring bills whose amount changes from month to month (the Amex, say):
   // the month check-in asks about these first. The Streamlit app ignores it.
   `ALTER TABLE bill_templates ADD COLUMN IF NOT EXISTS varies BOOLEAN NOT NULL DEFAULT FALSE`,
+  // A joint bill paid outside the joint account: from Cal's or Dani's own
+  // account, or from Cal's pay before it reaches him. NULL is the joint account.
+  `ALTER TABLE bill_templates ADD COLUMN IF NOT EXISTS paid_from TEXT CHECK (paid_from IN ('Cal','Dani','CalPay'))`,
+  `ALTER TABLE bill_entries ADD COLUMN IF NOT EXISTS paid_from TEXT CHECK (paid_from IN ('Cal','Dani','CalPay'))`,
 ];
 
 const FREEZE_SETTINGS_SQL = `
@@ -131,6 +137,14 @@ function assertTag(tag: string): asserts tag is Tag {
   if (!(VALID_TAGS as readonly string[]).includes(tag)) throw new Error(`tag must be one of ${VALID_TAGS.join(", ")}`);
 }
 
+/** Only a joint bill can be paid from somewhere else; a personal bill is always
+ *  paid from its owner's own account. */
+function paidFromFor(tag: string, paidFrom: unknown): PaidFrom {
+  if (tag !== "Joint" || paidFrom == null || paidFrom === "") return null;
+  if (!(PAID_FROM as readonly string[]).includes(String(paidFrom))) throw new Error(`paid from must be one of ${PAID_FROM.join(", ")}`);
+  return paidFrom as PaidFrom;
+}
+
 // ---------- settings ----------
 
 export interface Settings {
@@ -160,27 +174,28 @@ export async function saveSettings(s: Settings): Promise<void> {
 
 // ---------- recurring bills ----------
 
-export interface Template { id: number; name: string; defaultAmount: number; tag: Tag; varies: boolean }
+export interface Template { id: number; name: string; defaultAmount: number; tag: Tag; varies: boolean; paidFrom: PaidFrom }
 
 export async function getActiveTemplates(): Promise<Template[]> {
-  const rows = await query<{ id: number; name: string; default_amount: string; tag: Tag; varies: boolean }>(
-    "SELECT id, name, default_amount, tag, varies FROM bill_templates WHERE active = TRUE ORDER BY name");
-  return rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: num(r.default_amount), tag: r.tag, varies: r.varies }));
+  const rows = await query<{ id: number; name: string; default_amount: string; tag: Tag; varies: boolean; paid_from: PaidFrom }>(
+    "SELECT id, name, default_amount, tag, varies, paid_from FROM bill_templates WHERE active = TRUE ORDER BY name");
+  return rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: num(r.default_amount), tag: r.tag, varies: r.varies, paidFrom: r.paid_from }));
 }
 
 /** Save the recurring list: removals (soft), edits and additions in one go. */
-export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean }[], removedIds: number[]): Promise<void> {
+export async function saveTemplates(rows: { id: number | null; name: string; defaultAmount: number; tag: string; varies: boolean; paidFrom: string | null }[], removedIds: number[]): Promise<void> {
   await transaction(async (c) => {
     for (const id of removedIds) await c.query("UPDATE bill_templates SET active = FALSE WHERE id = $1", [id]);
     for (const r of rows) {
       if (!r.name.trim()) continue;
       assertTag(r.tag);
+      const paidFrom = paidFromFor(r.tag, r.paidFrom);
       if (r.id) {
-        await c.query("UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3, varies = $4 WHERE id = $5",
-          [r.name, r.defaultAmount, r.tag, r.varies, r.id]);
+        await c.query("UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3, varies = $4, paid_from = $5 WHERE id = $6",
+          [r.name, r.defaultAmount, r.tag, r.varies, paidFrom, r.id]);
       } else {
-        await c.query("INSERT INTO bill_templates (name, default_amount, tag, active, varies) VALUES ($1, $2, $3, TRUE, $4)",
-          [r.name, r.defaultAmount, r.tag, r.varies]);
+        await c.query("INSERT INTO bill_templates (name, default_amount, tag, active, varies, paid_from) VALUES ($1, $2, $3, TRUE, $4, $5)",
+          [r.name, r.defaultAmount, r.tag, r.varies, paidFrom]);
       }
     }
   });
@@ -235,8 +250,8 @@ export async function getOrCreateMonth(year: number, month: number): Promise<num
       "INSERT INTO months (year, month, confirmed, current_easy_access_balance) VALUES ($1, $2, FALSE, 0) RETURNING id", [year, month]);
     const id = rows[0].id as number;
     await c.query(
-      `INSERT INTO bill_entries (month_id, name, amount, tag, template_id)
-       SELECT $1, name, default_amount, tag, id FROM bill_templates WHERE active = TRUE`, [id]);
+      `INSERT INTO bill_entries (month_id, name, amount, tag, template_id, paid_from)
+       SELECT $1, name, default_amount, tag, id, paid_from FROM bill_templates WHERE active = TRUE`, [id]);
     return id;
   });
 }
@@ -247,11 +262,14 @@ export async function deleteMonth(id: number): Promise<void> {
 
 // ---------- one month's figures ----------
 
-export interface BillEntry { id: number; name: string; amount: number; tag: Tag; templateId: number | null }
+export interface BillEntry { id: number; name: string; amount: number; tag: Tag; templateId: number | null; paidFrom: PaidFrom }
 export interface Financials {
   month: Month;
+  /** Cal's take-home (what reached his account) and Dani's income. */
   calIncome: number; daniIncome: number;
   billsTotal: number; calBills: number; daniBills: number;
+  /** Joint bills paid outside the joint account. */
+  calFromPay: number; calFromAccount: number; daniFromAccount: number;
   /** The settings frozen when the month was confirmed; null on drafts. */
   frozenSettings: Settings | null;
 }
@@ -264,7 +282,10 @@ export async function getFinancials(id: number): Promise<Financials | null> {
       COALESCE((SELECT SUM(amount) FROM income_entries WHERE month_id = m.id AND person = 'Dani'), 0) AS dani_income,
       COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id), 0) AS bills_total,
       COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Cal'), 0) AS cal_bills,
-      COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Dani'), 0) AS dani_bills
+      COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Dani'), 0) AS dani_bills,
+      COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Joint' AND paid_from = 'CalPay'), 0) AS cal_from_pay,
+      COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Joint' AND paid_from = 'Cal'), 0) AS cal_from_account,
+      COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id AND tag = 'Joint' AND paid_from = 'Dani'), 0) AS dani_from_account
     FROM months m WHERE m.id = $1`, [id]);
   const r = rows[0];
   if (!r) return null;
@@ -273,6 +294,7 @@ export async function getFinancials(id: number): Promise<Financials | null> {
     month: toMonth(r),
     calIncome: num(r.cal_income), daniIncome: num(r.dani_income),
     billsTotal: num(r.bills_total), calBills: num(r.cal_bills), daniBills: num(r.dani_bills),
+    calFromPay: num(r.cal_from_pay), calFromAccount: num(r.cal_from_account), daniFromAccount: num(r.dani_from_account),
     frozenSettings: allowance == null ? null : {
       allowancePerPerson: allowance,
       savingsRate: num(r.settings_savings_rate),
@@ -288,9 +310,9 @@ export async function getAllFinancials(): Promise<Financials[]> {
 }
 
 export async function getBillEntries(monthId: number): Promise<BillEntry[]> {
-  const rows = await query<{ id: number; name: string; amount: string; tag: Tag; template_id: number | null }>(
-    "SELECT id, name, amount, tag, template_id FROM bill_entries WHERE month_id = $1 ORDER BY name", [monthId]);
-  return rows.map((r) => ({ id: r.id, name: r.name, amount: num(r.amount), tag: r.tag, templateId: r.template_id }));
+  const rows = await query<{ id: number; name: string; amount: string; tag: Tag; template_id: number | null; paid_from: PaidFrom }>(
+    "SELECT id, name, amount, tag, template_id, paid_from FROM bill_entries WHERE month_id = $1 ORDER BY name", [monthId]);
+  return rows.map((r) => ({ id: r.id, name: r.name, amount: num(r.amount), tag: r.tag, templateId: r.template_id, paidFrom: r.paid_from }));
 }
 
 export async function getIncome(monthId: number): Promise<Record<string, number>> {
@@ -301,7 +323,7 @@ export async function getIncome(monthId: number): Promise<Record<string, number>
 
 export interface MonthSave {
   monthId: number;
-  bills: { id: number | null; name: string; amount: number; tag: string }[];
+  bills: { id: number | null; name: string; amount: number; tag: string; paidFrom: string | null }[];
   removedIds: number[];
   /** Bill ids whose change should also update the recurring list. */
   carryForwardIds: number[];
@@ -318,16 +340,17 @@ export async function saveMonth(s: MonthSave): Promise<void> {
     for (const b of s.bills) {
       if (!b.name.trim()) continue;
       assertTag(b.tag);
+      const paidFrom = paidFromFor(b.tag, b.paidFrom);
       if (b.id) {
-        await c.query("UPDATE bill_entries SET name = $1, amount = $2, tag = $3 WHERE id = $4 AND month_id = $5",
-          [b.name, b.amount, b.tag, b.id, s.monthId]);
+        await c.query("UPDATE bill_entries SET name = $1, amount = $2, tag = $3, paid_from = $4 WHERE id = $5 AND month_id = $6",
+          [b.name, b.amount, b.tag, paidFrom, b.id, s.monthId]);
         if (s.carryForwardIds.includes(b.id)) {
           await c.query(
-            `UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3
-             WHERE id = (SELECT template_id FROM bill_entries WHERE id = $4)`, [b.name, b.amount, b.tag, b.id]);
+            `UPDATE bill_templates SET name = $1, default_amount = $2, tag = $3, paid_from = $4
+             WHERE id = (SELECT template_id FROM bill_entries WHERE id = $5)`, [b.name, b.amount, b.tag, paidFrom, b.id]);
         }
       } else {
-        await c.query("INSERT INTO bill_entries (month_id, name, amount, tag) VALUES ($1, $2, $3, $4)", [s.monthId, b.name, b.amount, b.tag]);
+        await c.query("INSERT INTO bill_entries (month_id, name, amount, tag, paid_from) VALUES ($1, $2, $3, $4, $5)", [s.monthId, b.name, b.amount, b.tag, paidFrom]);
       }
     }
     for (const [person, source, amount] of [["Cal", "Salary", s.calSalary], ["Cal", "RAF", s.calRaf], ["Dani", "Income", s.daniIncome]] as const) {

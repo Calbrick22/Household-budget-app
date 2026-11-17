@@ -11,6 +11,8 @@ import { money } from "@/lib/format";
 import { saveTemplates } from "@/app/actions";
 import { setUnsaved } from "@/lib/leave-guard";
 import { parseQuickAdd } from "@/lib/quick-add";
+import type { PaidFrom } from "@/lib/paid-from";
+import { PaidFromSelect } from "./paid-from-select";
 import { Avatar } from "./money";
 import { Sheet } from "./sheet";
 import { StackedBars } from "./charts";
@@ -21,13 +23,14 @@ const toNumber = (s: string) => { const n = Number(String(s).replace(/[£,\s]/g,
 const selectAll = (e: React.FocusEvent<HTMLInputElement>) => { const el = e.currentTarget; window.setTimeout(() => { if (document.activeElement === el) el.select(); }, 0); };
 
 export interface BillPoint { label: string; amount: number }
-interface TRow { key: string; id: number | null; name: string; amount: string; tag: Tag; varies: boolean; original: Template | null }
+interface TRow { key: string; id: number | null; name: string; amount: string; tag: Tag; varies: boolean; paidFrom: PaidFrom; original: Template | null }
 let n = 0;
 
 function isDirty(r: TRow): boolean {
   if (!r.original) return r.name.trim() !== "";
   return r.name !== r.original.name || Math.abs((toNumber(r.amount) || 0) - r.original.defaultAmount) >= 0.005
-    || r.tag !== r.original.tag || r.varies !== r.original.varies;
+    || r.tag !== r.original.tag || r.varies !== r.original.varies
+    || (r.tag === "Joint" ? r.paidFrom : null) !== r.original.paidFrom;
 }
 
 export function BillsBoard({ templates, history, oneOffs }: {
@@ -36,7 +39,7 @@ export function BillsBoard({ templates, history, oneOffs }: {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [rows, setRows] = useState<TRow[]>(() => templates.map((t) => ({
-    key: `t${t.id}`, id: t.id, name: t.name, amount: t.defaultAmount.toFixed(2), tag: t.tag, varies: t.varies, original: t,
+    key: `t${t.id}`, id: t.id, name: t.name, amount: t.defaultAmount.toFixed(2), tag: t.tag, varies: t.varies, paidFrom: t.paidFrom, original: t,
   })));
   const [removed, setRemoved] = useState<TRow[]>([]);
   const [yearly, setYearly] = useState(false);
@@ -66,7 +69,7 @@ export function BillsBoard({ templates, history, oneOffs }: {
   };
   const add = (name: string, amount: number, tag: Tag) => {
     const key = `n${++n}`;
-    setRows((rs) => [...rs, { key, id: null, name, amount: amount.toFixed(2), tag, varies: false, original: null }]);
+    setRows((rs) => [...rs, { key, id: null, name, amount: amount.toFixed(2), tag, varies: false, paidFrom: null, original: null }]);
     setMoved(key);
   };
   const known = new Set(rows.map((r) => r.name.trim().toLowerCase()));
@@ -137,7 +140,7 @@ export function BillsBoard({ templates, history, oneOffs }: {
       <div className="board-save">
         <button className="btn primary" type="button" disabled={pending || !dirty || invalid} onClick={() => start(async () => {
           try {
-            await saveTemplates(rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: toNumber(r.amount) || 0, tag: r.tag, varies: r.varies })), removed.map((r) => r.id!));
+            await saveTemplates(rows.map((r) => ({ id: r.id, name: r.name, defaultAmount: toNumber(r.amount) || 0, tag: r.tag, varies: r.varies, paidFrom: r.tag === "Joint" ? r.paidFrom : null })), removed.map((r) => r.id!));
             setRemoved([]); setUnsaved(false);
             router.replace(`/settings?saved=${encodeURIComponent("Recurring bills saved.")}`, { scroll: false });
           } catch (e) { setMsg(e instanceof Error ? e.message : "Couldn't save."); }
@@ -194,6 +197,8 @@ function BillCard({ r, points, yearly, arrived, onChange, onRemove }: {
         </select>
         <button className="btn icon ghost" type="button" onClick={onRemove} aria-label={`Remove ${r.name || "this bill"}`} title="Remove from future months when you save"><IconClose /></button>
       </div>
+      {r.tag === "Joint" && <PaidFromSelect id={`${id}-from`} name={r.name} value={r.paidFrom}
+        changed={r.original != null && r.paidFrom !== r.original.paidFrom} onChange={(paidFrom) => onChange({ paidFrom })} />}
       {bad && <p id={`${id}-error`} className="field-error">Enter an amount for {r.name || "this bill"}, like 45.00</p>}
       {yearly && !bad && <p className="small muted">{money(toNumber(r.amount) * 12)} a year</p>}
       <div className="bill-card-foot">

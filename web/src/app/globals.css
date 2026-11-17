@@ -798,3 +798,19 @@ a.received svg { animation: received .55s var(--ease-out); }
 .board-col.joint .spark { color: var(--joint-mid); }
 .board-col.cal .spark { color: var(--cal-mid); }
 .board-col.dani .spark { color: var(--dani-mid); }
+
+/* where a joint bill is paid from: a quiet line under the bill */
+.paid-from { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 36px; margin-top: -2px; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+.paid-from select {
+  appearance: none; min-height: 36px; padding: 0 26px 0 10px; border: 1px solid transparent; border-radius: var(--radius-inner);
+  background: var(--well) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235c6064' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.paid-from.elsewhere select { background-color: var(--joint-soft); color: var(--joint); }
+.paid-from.changed select { border-color: var(--joint-pale); }
+.bill-card .paid-from select { background-color: var(--surface); }
+.bill-card .paid-from.elsewhere select { background-color: var(--joint-soft); }
+@media (pointer: coarse) { .paid-from, .paid-from select { min-height: 44px; } }
+@media (prefers-color-scheme: dark) {
+  .paid-from select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23a3a8ae' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+}

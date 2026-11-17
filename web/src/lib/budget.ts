@@ -15,6 +15,7 @@ export function calculateMonth(fin: Financials, live: Settings): WaterfallResult
     allowancePerPerson: s.allowancePerPerson, savingsRate: s.savingsRate,
     easyAccessTarget: s.easyAccessTarget, currentEasyAccessBalance: fin.month.easyAccessBalance,
     calPersonalBills: fin.calBills, daniPersonalBills: fin.daniBills,
+    calFromPay: fin.calFromPay, calFromAccount: fin.calFromAccount, daniFromAccount: fin.daniFromAccount,
   });
 }
 

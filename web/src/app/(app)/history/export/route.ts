@@ -1,4 +1,5 @@
-// One row per month, the same columns as the Streamlit export.
+// One row per month: the Streamlit export's columns, then the transfers and
+// the joint bills paid outside the joint account.
 import * as db from "@/lib/db";
 import { calculateMonth } from "@/lib/budget";
 import { hasSession } from "@/lib/session";
@@ -10,6 +11,9 @@ const FIELDS = [
   "allowance_per_person", "allowance_total", "savings_rate", "cal_personal_savings",
   "dani_personal_savings", "remainder", "is_shortfall", "current_easy_access_balance",
   "easy_access_target", "to_easy_access", "to_long_term",
+  // Not in the Streamlit export: joint bills paid outside the joint account.
+  // cal_income above includes anything taken from Cal's pay; this is what reached him.
+  "cal_take_home", "cal_from_pay", "cal_from_account", "dani_from_account", "cal_to_joint", "dani_to_joint",
 ] as const;
 
 // Python's str() for the same values: True/False, and floats always carry a decimal point.
@@ -28,6 +32,8 @@ export async function GET() {
       cal_personal_savings: r.calPersonalSavings, dani_personal_savings: r.daniPersonalSavings,
       remainder: r.remainder, is_shortfall: r.isShortfall, current_easy_access_balance: r.currentEasyAccessBalance,
       easy_access_target: r.easyAccessTarget, to_easy_access: r.toEasyAccess, to_long_term: r.toLongTerm,
+      cal_take_home: r.calTakeHome, cal_from_pay: r.calFromPay, cal_from_account: r.calFromAccount,
+      dani_from_account: r.daniFromAccount, cal_to_joint: r.calToJoint, dani_to_joint: r.daniToJoint,
     };
     lines.push(FIELDS.map((k) => (k === "year" || k === "month" ? String(row[k]) : cell(row[k]))).join(","));
   }

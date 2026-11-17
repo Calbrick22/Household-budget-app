@@ -14,6 +14,8 @@ import { confirmLeave, setUnsaved } from "@/lib/leave-guard";
 import { Avatar, Row } from "./money";
 import { IconCheck, IconClose, IconPlus } from "./icons";
 import { FlowArrow } from "./lane-carousel";
+import { paidElsewhere, type PaidFrom } from "@/lib/paid-from";
+import { PaidFromSelect } from "./paid-from-select";
 
 const TAGS: Tag[] = ["Joint", "Cal", "Dani"];
 const STEPS = ["Income", "Bills", "Pot", "Finish"] as const;
@@ -26,7 +28,9 @@ interface BillRow {
   name: string;
   amount: string;
   tag: Tag;
-  original: { name: string; amount: number; tag: Tag } | null;
+  /** Joint bills only: where the money actually leaves from (null: the joint account). */
+  paidFrom: PaidFrom;
+  original: { name: string; amount: number; tag: Tag; paidFrom: PaidFrom } | null;
 }
 
 export interface CheckInProps {
@@ -62,7 +66,8 @@ function changed(r: BillRow): boolean {
   if (!r.original) return false;
   return r.name.trim() !== r.original.name.trim()
     || Math.abs((toNumber(r.amount) || 0) - r.original.amount) >= 0.005
-    || r.tag !== r.original.tag;
+    || r.tag !== r.original.tag
+    || (r.tag === "Joint" ? r.paidFrom : null) !== r.original.paidFrom;
 }
 
 export function MonthCheckIn(p: CheckInProps) {
@@ -74,8 +79,8 @@ export function MonthCheckIn(p: CheckInProps) {
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState<0 | 1 | -1>(0);
   const [rows, setRows] = useState<BillRow[]>(() => p.bills.map((b) => ({
-    key: `b${b.id}`, id: b.id, templateId: b.templateId, name: b.name, amount: fixed(b.amount), tag: b.tag,
-    original: { name: b.name, amount: b.amount, tag: b.tag },
+    key: `b${b.id}`, id: b.id, templateId: b.templateId, name: b.name, amount: fixed(b.amount), tag: b.tag, paidFrom: b.paidFrom,
+    original: { name: b.name, amount: b.amount, tag: b.tag, paidFrom: b.paidFrom },
   })));
   const [removed, setRemoved] = useState<BillRow[]>([]);
   const [calSalary, setCalSalary] = useState(fixed(p.calSalary));
@@ -113,7 +118,7 @@ export function MonthCheckIn(p: CheckInProps) {
   const [added, setAdded] = useState<string | null>(null);
   const addRow = () => {
     const key = newKey();
-    setRows((rs) => [...rs, { key, id: null, templateId: null, name: "", amount: "0.00", tag: "Joint", original: null }]);
+    setRows((rs) => [...rs, { key, id: null, templateId: null, name: "", amount: "0.00", tag: "Joint", paidFrom: null, original: null }]);
     setAdded(key); setDirty(true);
   };
 
@@ -121,6 +126,8 @@ export function MonthCheckIn(p: CheckInProps) {
   const totals = { Joint: 0, Cal: 0, Dani: 0 } as Record<Tag, number>;
   for (const r of live) totals[r.tag] += toNumber(r.amount) || 0;
   const changedRecurring = rows.filter((r) => r.templateId != null && changed(r));
+  const elsewhere = paidElsewhere(live.map((r) => ({ amount: toNumber(r.amount) || 0, tag: r.tag, paidFrom: r.paidFrom })));
+  const fromPayBills = live.filter((r) => r.tag === "Joint" && r.paidFrom === "CalPay");
 
   // The bills split three ways: the ones that change every month, one-offs, and the usual ones.
   const varies = rows.filter((r) => r.templateId != null && p.variesIds.includes(r.templateId));
@@ -140,11 +147,12 @@ export function MonthCheckIn(p: CheckInProps) {
         allowancePerPerson: p.settings.allowancePerPerson, savingsRate: p.settings.savingsRate,
         easyAccessTarget: p.settings.easyAccessTarget, currentEasyAccessBalance: toNumber(easy),
         calPersonalBills: round(totals.Cal), daniPersonalBills: round(totals.Dani),
+        ...elsewhere,
       });
     } catch (e) {
       return e instanceof Error ? e.message.replace(/_/g, " ") : "Those figures don't work.";
     }
-  }, [calSalary, calRaf, daniIncome, easy, live, totals, p.settings]);
+  }, [calSalary, calRaf, daniIncome, easy, live, totals, elsewhere, p.settings]);
   const r = typeof preview === "string" ? null : preview;
 
   const go = (to: number) => {
@@ -184,7 +192,7 @@ export function MonthCheckIn(p: CheckInProps) {
       try {
         await saveMonth({
           monthId: p.monthId,
-          bills: rows.map((x) => ({ id: x.id, name: x.name, amount: toNumber(x.amount) || 0, tag: x.tag })),
+          bills: rows.map((x) => ({ id: x.id, name: x.name, amount: toNumber(x.amount) || 0, tag: x.tag, paidFrom: x.tag === "Joint" ? x.paidFrom : null })),
           removedIds: removed.map((x) => x.id!),
           carryForwardIds: carry ? changedRecurring.map((x) => x.id!) : [],
           calSalary: toNumber(calSalary), calRaf: toNumber(calRaf), daniIncome: toNumber(daniIncome),
@@ -274,7 +282,13 @@ export function MonthCheckIn(p: CheckInProps) {
               <div className="income-grid">
                 <div className="stack" style={{ gap: 12 }}>
                   <span className="person-head"><Avatar who="Cal" small />Cal</span>
-                  <div className="field"><label htmlFor="cal-salary">Salary (£)</label><input {...amountProps("cal-salary", calSalary, setCalSalary)} />{fieldError("cal-salary", calSalary)}</div>
+                  <div className="field"><label htmlFor="cal-salary">Salary, take-home (£)</label><input {...amountProps("cal-salary", calSalary, setCalSalary)} />{fieldError("cal-salary", calSalary)}
+                    {fromPayBills.length > 0 && (
+                      <p className="calc" style={{ margin: 0 }}>
+                        What reached your account. {fromPayBills.map((x) => x.name.trim()).join(" and ")} ({money(elsewhere.calFromPay)}) comes out of your pay first; it&apos;s a joint bill, so the split adds it back for you.
+                      </p>
+                    )}
+                  </div>
                   <div className="field"><label htmlFor="cal-raf">RAF (£)</label><input {...amountProps("cal-raf", calRaf, setCalRaf)} />{fieldError("cal-raf", calRaf)}</div>
                 </div>
                 <div className="stack" style={{ gap: 12 }}>
@@ -394,12 +408,15 @@ function Review({ r }: { r: WaterfallResult }) {
   return (
     <>
       <div className="review-grid">
-        {([["Cal", r.calToJoint, r.calPersonalSavings], ["Dani", r.daniToJoint, r.daniPersonalSavings]] as const).map(([who, toJoint, sav]) => (
+        {([["Cal", r.calToJoint, r.calPersonalSavings, r.calFromPay + r.calFromAccount, r.calFromAccount],
+          ["Dani", r.daniToJoint, r.daniPersonalSavings, r.daniFromAccount, r.daniFromAccount]] as const).map(([who, toJoint, sav, paid, keep]) => (
           <div key={who} className={`review-card ${who.toLowerCase()}`}>
             <span className="person-head"><Avatar who={who} small />{who} moves</span>
-            <Row label="Joint account" value={money(Math.max(toJoint, 0))} />
+            <Row label="Joint account" value={money(Math.max(toJoint, 0))}
+              sub={paid > 0 ? `after the ${money(paid)} of joint bills ${who === "Cal" ? "he" : "she"} pays` : undefined} />
             <Row label="Personal account" value={money(r.allowancePerPerson)} />
             <Row label="Personal savings" value={money(sav)} />
+            {keep > 0 && <Row label="Keeps back for joint bills" value={money(keep)} />}
           </div>
         ))}
       </div>
@@ -470,6 +487,8 @@ function BillInputs({ row, hint, focus, onChange, onRemove }: { row: BillRow; hi
         {TAGS.map((t) => <option key={t}>{t}</option>)}
       </select>
       <button className="btn icon ghost" type="button" onClick={onRemove} aria-label={`Remove ${row.name || "this bill"}`} title="Remove when you save"><IconClose /></button>
+      {row.tag === "Joint" && <PaidFromSelect id={`${row.key}-from`} name={row.name} value={row.paidFrom}
+        changed={isChanged && row.paidFrom !== (row.original?.paidFrom ?? null)} onChange={(paidFrom) => onChange({ paidFrom })} />}
       {hint && !bad && <p id={`${row.key}-hint`} className="bill-hint">Last month: {hint}</p>}
       {bad && <p id={`${row.key}-error`} className="field-error">Enter an amount for {row.name || "this bill"}, like 45.00</p>}
     </div>

@@ -21,6 +21,7 @@ export default async function SettingsPage() {
     label: monthLabel(latest.month), confirmed: latest.month.confirmed,
     calIncome: latest.calIncome, daniIncome: latest.daniIncome, billsTotal: latest.billsTotal,
     calBills: latest.calBills, daniBills: latest.daniBills, easyAccessBalance: latest.month.easyAccessBalance,
+    calFromPay: latest.calFromPay, calFromAccount: latest.calFromAccount, daniFromAccount: latest.daniFromAccount,
   } : null;
 
   return (
