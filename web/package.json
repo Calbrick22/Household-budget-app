@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test --experimental-strip-types --no-warnings \"tests/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "sh e2e/seed.sh && node --experimental-strip-types --no-warnings e2e/share.mjs 1440 && node --experimental-strip-types --no-warnings e2e/share.mjs 390 && node --experimental-strip-types --no-warnings e2e/flows.mjs 1440 && node --experimental-strip-types --no-warnings e2e/flows.mjs 390"
   },
   "dependencies": {
     "next": "16.3.8",

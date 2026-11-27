@@ -6,9 +6,9 @@
 // carry-forward choice all wait for it, and closing with changes asks first.
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { calculateWaterfall, type WaterfallResult } from "@/lib/calculations";
+import { calculateShare, calculateWaterfall, type WaterfallResult } from "@/lib/calculations";
 import type { BillEntry, Settings, Tag } from "@/lib/db";
-import { money, pct, ratePct } from "@/lib/format";
+import { money, pct, ratePct, sharePct } from "@/lib/format";
 import { saveMonth } from "@/app/actions";
 import { confirmLeave, setUnsaved } from "@/lib/leave-guard";
 import { Avatar, Row } from "./money";
@@ -39,6 +39,9 @@ export interface CheckInProps {
   previousName: string | null;
   confirmed: boolean;
   settings: Settings;
+  /** The model the month is worked out with: drafts use the joint share; months
+   *  confirmed before it keep the waterfall. */
+  model: "waterfall" | "share";
   bills: BillEntry[];
   /** Recurring bills marked "varies regularly". */
   variesIds: number[];
@@ -141,18 +144,21 @@ export function MonthCheckIn(p: CheckInProps) {
     if (nums.some(Number.isNaN)) return "One of the amounts isn't a number.";
     const round = (n: number) => Math.round(n * 100) / 100;
     try {
-      return calculateWaterfall({
+      const figures = {
         calIncome: round(toNumber(calSalary) + toNumber(calRaf)), daniIncome: toNumber(daniIncome),
         billsTotal: round(totals.Joint + totals.Cal + totals.Dani),
-        allowancePerPerson: p.settings.allowancePerPerson, savingsRate: p.settings.savingsRate,
+        allowancePerPerson: p.settings.allowancePerPerson,
         easyAccessTarget: p.settings.easyAccessTarget, currentEasyAccessBalance: toNumber(easy),
         calPersonalBills: round(totals.Cal), daniPersonalBills: round(totals.Dani),
         ...elsewhere,
-      });
+      };
+      return p.model === "share"
+        ? calculateShare({ ...figures, jointShare: p.settings.jointShare })
+        : calculateWaterfall({ ...figures, savingsRate: p.settings.savingsRate });
     } catch (e) {
       return e instanceof Error ? e.message.replace(/_/g, " ") : "Those figures don't work.";
     }
-  }, [calSalary, calRaf, daniIncome, easy, live, totals, elsewhere, p.settings]);
+  }, [calSalary, calRaf, daniIncome, easy, live, totals, elsewhere, p.settings, p.model]);
   const r = typeof preview === "string" ? null : preview;
 
   const go = (to: number) => {
@@ -413,13 +419,24 @@ function Review({ r }: { r: WaterfallResult }) {
           <div key={who} className={`review-card ${who.toLowerCase()}`}>
             <span className="person-head"><Avatar who={who} small />{who} moves</span>
             <Row label="Joint account" value={money(Math.max(toJoint, 0))}
-              sub={paid > 0 ? `after the ${money(paid)} of joint bills ${who === "Cal" ? "he" : "she"} pays` : undefined} />
+              sub={[r.model === "share" ? `${sharePct(r.jointShare)} of income` : "",
+                paid > 0 ? `${r.model === "share" ? "less" : "after"} the ${money(paid)} of joint bills ${who === "Cal" ? "he" : "she"} pays` : ""].filter(Boolean).join(", ") || undefined} />
             <Row label="Personal account" value={money(r.allowancePerPerson)} />
             <Row label="Personal savings" value={money(sav)} />
             {keep > 0 && <Row label="Keeps back for joint bills" value={money(keep)} />}
           </div>
         ))}
       </div>
+      {r.model === "share" ? (
+        <div className="step">
+          <p className="step-title">The working</p>
+          <Row label="Into joint from you both" value={money(r.pot)} sub={`${sharePct(r.jointShare)} of each income: Cal ${money(r.calJointShare)} · Dani ${money(r.daniJointShare)}`} />
+          <Row label="Joint bills" value={`−${money(r.jointBillsTotal)}`} />
+          <Row label={r.isShortfall ? "Joint short by" : "Left: joint savings"} value={money(r.remainder)} cls="total" />
+          <Row label="Personal savings" value={money(r.personalSavingsTotal)} sub="what's left of each income after own bills and the allowance" />
+          <Row label="Saved in all" value={money(r.jointSavings + r.personalSavingsTotal)} cls="total" />
+        </div>
+      ) : (
       <div className="step">
         <p className="step-title">The working</p>
         <Row label="Into the joint pot" value={money(r.pot)} sub={`Cal ${pct(r.calContributionShare)} · Dani ${pct(r.daniContributionShare)}`} />
@@ -429,7 +446,13 @@ function Review({ r }: { r: WaterfallResult }) {
         <Row label={`Joint savings (${ratePct(r.savingsRate)})`} value={money(r.jointSavings)} />
         <Row label="Saved in all" value={money(r.jointSavings + r.personalSavingsTotal)} cls="total" />
       </div>
-      {r.isShortfall && <p className="alert bad" style={{ marginTop: 14 }}>Shortfall: bills and allowances are {money(-r.remainder)} more than the pot.</p>}
+      )}
+      {r.isShortfall && <p className="alert bad" style={{ marginTop: 14 }}>{r.model === "share"
+        ? `Joint shortfall: ${sharePct(r.jointShare)} of your incomes is ${money(-r.remainder)} short of the joint bills.`
+        : `Shortfall: bills and allowances are ${money(-r.remainder)} more than the pot.`}</p>}
+      {r.model === "share" && ([["Cal", r.calRest], ["Dani", r.daniRest]] as const).filter(([, rest]) => rest < r.allowancePerPerson).map(([who, rest]) => (
+        <p key={who} className="alert bad" style={{ marginTop: 10 }}>{who}&apos;s own bills and allowance are {money(r.allowancePerPerson - rest)} more than what&apos;s left after the joint share.</p>
+      ))}
       {!r.isShortfall && (r.calToJoint < 0 || r.daniToJoint < 0) && <p className="alert bad" style={{ marginTop: 14 }}>A joint transfer would go below zero this month.</p>}
     </>
   );

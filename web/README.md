@@ -39,3 +39,18 @@ npm test                     # the maths, against calculations.py (needs python3
 On its first request the app makes sure the tables and the three frozen-settings
 columns exist and freezes any confirmed month that has no settings yet - the
 same start-up work the Streamlit app does, so running both is safe.
+
+## Browser tests (local only)
+
+`e2e/` drives the built app in a real browser against a throwaway local
+Postgres, never the production database:
+
+```sh
+npm run build
+sh e2e/up.sh web   # local Postgres on 127.0.0.1:5433 and the app on :3000
+npm run e2e        # reseeds the local database, then runs the journeys at 1440px and 390px
+```
+
+`e2e/seed.sql` is the test data; the app adds its later columns itself on
+start-up, exactly as it does on the real database. The scripts expect
+Playwright with Chromium (as in the cloud sessions this was built in).

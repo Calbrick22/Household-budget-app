@@ -33,8 +33,9 @@ export default async function SettingsPage() {
       <div className="settings-row section-gap">
         <div className="settings-label">
           <h2>How each month is split</h2>
-          <p>The allowance goes to each of you every month. The joint savings rate is the share of what&apos;s left (after bills and allowances) that goes to joint savings - everything else becomes personal savings, split between Cal and Dani by how much each of you contributed.</p>
-          <p>Changes apply to drafts and to every month you finish from now on. Confirmed months keep the settings they were confirmed with.</p>
+          <p>Each of you puts the <b>joint share</b> of your income towards joint costs first. The joint account pays the joint bills, and whatever is left there becomes joint savings. The rest of your income is yours: your own bills, then the allowance, then personal savings.</p>
+          <p>Joint bills you pay yourself (the car from Cal&apos;s pay, say) count towards your share, so you move that much less into joint.</p>
+          <p>Changes apply to drafts and to every month you finish from now on. Confirmed months keep the settings, and the way of splitting, they were confirmed with.</p>
         </div>
         <SettingsForm key={JSON.stringify(settings)} settings={settings} preview={preview} />
       </div>

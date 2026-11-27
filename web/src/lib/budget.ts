@@ -1,5 +1,5 @@
 // Turns a month's stored figures into the waterfall, with the right settings.
-import { calculateWaterfall, type WaterfallResult } from "./calculations";
+import { calculateShare, calculateWaterfall, type WaterfallResult } from "./calculations";
 import type { Financials, Month, Settings } from "./db";
 
 /** A confirmed month keeps the settings it was confirmed with; a draft
@@ -8,8 +8,23 @@ export function settingsFor(fin: Financials, live: Settings): Settings {
   return fin.frozenSettings ?? live;
 }
 
+/** Months confirmed before the joint-share model keep the waterfall they were
+ *  confirmed with; drafts and everything finished since use the joint share. */
+export function modelFor(fin: Financials): "waterfall" | "share" {
+  return fin.frozenModel ?? "share";
+}
+
 export function calculateMonth(fin: Financials, live: Settings): WaterfallResult {
   const s = settingsFor(fin, live);
+  if (modelFor(fin) === "share") {
+    return calculateShare({
+      calIncome: fin.calIncome, daniIncome: fin.daniIncome, billsTotal: fin.billsTotal,
+      calPersonalBills: fin.calBills, daniPersonalBills: fin.daniBills, jointShare: s.jointShare,
+      allowancePerPerson: s.allowancePerPerson, easyAccessTarget: s.easyAccessTarget,
+      currentEasyAccessBalance: fin.month.easyAccessBalance,
+      calFromPay: fin.calFromPay, calFromAccount: fin.calFromAccount, daniFromAccount: fin.daniFromAccount,
+    });
+  }
   return calculateWaterfall({
     calIncome: fin.calIncome, daniIncome: fin.daniIncome, billsTotal: fin.billsTotal,
     allowancePerPerson: s.allowancePerPerson, savingsRate: s.savingsRate,

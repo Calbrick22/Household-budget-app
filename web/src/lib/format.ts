@@ -16,3 +16,6 @@ export const MONTHS = ["January", "February", "March", "April", "May", "June", "
 export const monthName = (m: number) => MONTHS[m - 1];
 export const monthShort = (m: number) => MONTHS[m - 1].slice(0, 3);
 export const monthLabel = (m: { month: number; year: number }) => `${monthName(m.month)} ${m.year}`;
+
+/** A share as the person set it: 0.45 → "45%", 0.475 → "47.5%". */
+export const sharePct = (share: number) => `${Math.round(share * 1000) / 10}%`;
