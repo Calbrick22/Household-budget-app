@@ -13,8 +13,10 @@ import type { Change } from "./month-cards";
 
 const Cue = ({ children }: { children: React.ReactNode }) => <span className="tile-cue">{children} <span aria-hidden="true">›</span></span>;
 
-export function SavedTile({ month, saved, joint, cal, dani, short, pot, left, children }: {
+export function SavedTile({ month, saved, joint, cal, dani, short, pot, left, rows = ["Into the joint pot", "Left after bills and allowances"], children }: {
   month: string; saved: number; joint: number; cal: number; dani: number; short: number | null; pot: number; left: number; children: React.ReactNode;
+  /** Labels for the two working rows; the joint-share model words them differently. */
+  rows?: [string, string];
 }) {
   const parts = [
     { name: "Joint", value: joint, color: "var(--joint-mid)" },
@@ -39,8 +41,8 @@ export function SavedTile({ month, saved, joint, cal, dani, short, pot, left, ch
             </>
           ) : <span className="small muted">Bills and allowances are more than the pot, so nothing is saved.</span>}
           <span className="tile-rows">
-            <span><span>Into the joint pot</span><b><Roll value={pot} /></b></span>
-            <span><span>Left after bills and allowances</span><b><Roll value={left} /></b></span>
+            <span><span>{rows[0]}</span><b><Roll value={pot} /></b></span>
+            <span><span>{rows[1]}</span><b><Roll value={left} /></b></span>
           </span>
           <Cue>See the maths</Cue>
         </button>

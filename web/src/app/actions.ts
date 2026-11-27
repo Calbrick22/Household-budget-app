@@ -74,14 +74,15 @@ export async function deleteMonth(form: FormData): Promise<void> {
   redirect("/history?deleted=1");
 }
 
-export async function saveSettings(input: db.Settings): Promise<{ ok: true }> {
+export async function saveSettings(input: { allowancePerPerson: number; jointShare: number; easyAccessTarget: number }): Promise<{ ok: true }> {
   await requireSession();
-  const rate = Number(input.savingsRate);
-  if (!(rate >= 0 && rate <= 1)) throw new Error("The joint savings rate must be between 0% and 100%.");
+  const share = Number(input.jointShare);
+  if (!(share >= 0 && share <= 1)) throw new Error("The joint share must be between 0% and 100%.");
   const allowance = money(input.allowancePerPerson, "Allowance");
   const target = money(input.easyAccessTarget, "Target");
   if (allowance < 0 || target < 0) throw new Error("Amounts can't be negative.");
-  await db.saveSettings({ allowancePerPerson: allowance, savingsRate: rate, easyAccessTarget: target });
+  const current = await db.getSettings();
+  await db.saveSettings({ ...current, allowancePerPerson: allowance, jointShare: share, easyAccessTarget: target });
   revalidatePath("/", "layout");
   return { ok: true };
 }

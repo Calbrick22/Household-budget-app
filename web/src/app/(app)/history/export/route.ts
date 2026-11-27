@@ -14,6 +14,8 @@ const FIELDS = [
   // Not in the Streamlit export: joint bills paid outside the joint account.
   // cal_income above includes anything taken from Cal's pay; this is what reached him.
   "cal_take_home", "cal_from_pay", "cal_from_account", "dani_from_account", "cal_to_joint", "dani_to_joint",
+  // The model each month was worked out with ("waterfall" or "share") and the share used.
+  "model", "joint_share",
 ] as const;
 
 // Python's str() for the same values: True/False, and floats always carry a decimal point.
@@ -34,6 +36,7 @@ export async function GET() {
       easy_access_target: r.easyAccessTarget, to_easy_access: r.toEasyAccess, to_long_term: r.toLongTerm,
       cal_take_home: r.calTakeHome, cal_from_pay: r.calFromPay, cal_from_account: r.calFromAccount,
       dani_from_account: r.daniFromAccount, cal_to_joint: r.calToJoint, dani_to_joint: r.daniToJoint,
+      model: r.model, joint_share: r.jointShare,
     };
     lines.push(FIELDS.map((k) => (k === "year" || k === "month" ? String(row[k]) : cell(row[k]))).join(","));
   }

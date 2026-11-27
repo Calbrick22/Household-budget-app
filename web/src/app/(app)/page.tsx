@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import * as db from "@/lib/db";
-import { calculateMonth, nextMonthAfter, previousConfirmed, settingsFor, totalSaved } from "@/lib/budget";
+import { calculateMonth, modelFor, nextMonthAfter, previousConfirmed, settingsFor, totalSaved } from "@/lib/budget";
 import { money, monthLabel, monthName, monthShort } from "@/lib/format";
 import { requireSession } from "@/lib/session";
 import { Avatar, StatusPill } from "@/components/money";
@@ -69,7 +69,8 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
     : !latest.confirmed ? { name: monthLabel(latest), href: checkInHref(latest.id) } : null;
   const label = monthLabel(month);
   const toJoint = (v: number) => Math.max(v, 0);
-  const summary = r.isShortfall
+  // A joint shortfall under the joint share still leaves personal savings, so it reads like any month.
+  const summary = r.isShortfall && r.model === "waterfall"
     ? `${label} is confirmed, short by ${money(-r.remainder)}.`
     : `${label} is confirmed: ${money(totalSaved(r))} saved. Cal ${money(toJoint(r.calToJoint))} and Dani ${money(toJoint(r.daniToJoint))} into joint.`;
 
@@ -85,7 +86,7 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
         // A new key after every save, so the check-in starts again from what was stored.
         key={`${bills.map((b) => `${b.id}:${b.amount}:${b.tag}:${b.name}`).join("|")}|${fin.calIncome}|${fin.daniIncome}|${month!.easyAccessBalance}`}
         monthId={month!.id} monthName={label} previousName={prev ? monthName(prev.month) : null}
-        confirmed={month!.confirmed} settings={settingsFor(fin, live)} bills={bills}
+        confirmed={month!.confirmed} settings={settingsFor(fin, live)} model={modelFor(fin)} bills={bills}
         variesIds={templates.filter((t) => t.varies).map((t) => t.id)} lastAmounts={lastAmounts}
         calSalary={income["Cal:Salary"] ?? 0} calRaf={income["Cal:RAF"] ?? 0} daniIncome={income["Dani:Income"] ?? 0}
         lastIncome={prevIncome ? { calSalary: prevIncome["Cal:Salary"] ?? 0, calRaf: prevIncome["Cal:RAF"] ?? 0, daniIncome: prevIncome["Dani:Income"] ?? 0 } : null}
@@ -135,9 +136,10 @@ export default async function ThisMonth({ searchParams }: { searchParams: Promis
 
         <div className="bento">
           <SavedTile month={label} saved={totalSaved(r)} joint={r.jointSavings} cal={r.calPersonalSavings} dani={r.daniPersonalSavings}
-            short={r.isShortfall ? -r.remainder : null} pot={r.pot} left={r.remainder}>
+            short={r.isShortfall && r.model === "waterfall" ? -r.remainder : null} pot={r.pot} left={r.remainder}
+            rows={r.model === "share" ? ["Into joint from you both", r.isShortfall ? "Joint short after the bills" : "Left in joint after the bills"] : undefined}>
             <WorkingSteps r={r} />
-            <SettingsUsed s={settingsFor(fin, live)} frozen={fin.frozenSettings != null} />
+            <SettingsUsed s={settingsFor(fin, live)} frozen={fin.frozenSettings != null} model={modelFor(fin)} />
           </SavedTile>
           <PotTile balance={r.currentEasyAccessBalance} added={r.toEasyAccess} target={r.easyAccessTarget}>
             <p className="calc" style={{ margin: "4px 0 0" }}>

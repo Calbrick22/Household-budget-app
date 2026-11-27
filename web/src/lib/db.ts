@@ -14,6 +14,7 @@ export type { PaidFrom };
 const DEFAULT_SETTINGS: Record<string, string> = {
   allowance_per_person: "250",
   savings_rate: "0.15",
+  joint_share: "0.45",
   easy_access_target: "5000",
 };
 
@@ -59,6 +60,10 @@ const SCHEMA = [
   // account, or from Cal's pay before it reaches him. NULL is the joint account.
   `ALTER TABLE bill_templates ADD COLUMN IF NOT EXISTS paid_from TEXT CHECK (paid_from IN ('Cal','Dani','CalPay'))`,
   `ALTER TABLE bill_entries ADD COLUMN IF NOT EXISTS paid_from TEXT CHECK (paid_from IN ('Cal','Dani','CalPay'))`,
+  // Which model a confirmed month was worked out with: NULL is the original
+  // waterfall, 'share' the joint-share model, with the share it used.
+  `ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_model TEXT CHECK (settings_model IN ('share'))`,
+  `ALTER TABLE months ADD COLUMN IF NOT EXISTS settings_joint_share NUMERIC`,
 ];
 
 const FREEZE_SETTINGS_SQL = `
@@ -66,6 +71,17 @@ const FREEZE_SETTINGS_SQL = `
     settings_allowance_per_person = (SELECT value::numeric FROM settings WHERE key = 'allowance_per_person'),
     settings_savings_rate = (SELECT value::numeric FROM settings WHERE key = 'savings_rate'),
     settings_easy_access_target = (SELECT value::numeric FROM settings WHERE key = 'easy_access_target')`;
+
+// Finishing a month from now on freezes the joint-share model and its share too.
+const FINISH_SQL = `
+  UPDATE months SET
+    confirmed = TRUE,
+    settings_allowance_per_person = (SELECT value::numeric FROM settings WHERE key = 'allowance_per_person'),
+    settings_savings_rate = (SELECT value::numeric FROM settings WHERE key = 'savings_rate'),
+    settings_easy_access_target = (SELECT value::numeric FROM settings WHERE key = 'easy_access_target'),
+    settings_model = 'share',
+    settings_joint_share = (SELECT value::numeric FROM settings WHERE key = 'joint_share')
+  WHERE id = $1`;
 
 // One pool per server instance (kept across hot reloads in development).
 const globalForPool = globalThis as unknown as { __hbPool?: Pool; __hbReady?: Promise<void> };
@@ -149,8 +165,11 @@ function paidFromFor(tag: string, paidFrom: unknown): PaidFrom {
 
 export interface Settings {
   allowancePerPerson: number;
+  /** The joint savings rate of the original waterfall model (months confirmed before December 2026). */
   savingsRate: number;
   easyAccessTarget: number;
+  /** The share of each income that goes to joint costs (the joint-share model). */
+  jointShare: number;
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -160,6 +179,7 @@ export async function getSettings(): Promise<Settings> {
     allowancePerPerson: Number(m.allowance_per_person),
     savingsRate: Number(m.savings_rate),
     easyAccessTarget: Number(m.easy_access_target),
+    jointShare: Number(m.joint_share ?? DEFAULT_SETTINGS.joint_share),
   };
 }
 
@@ -167,8 +187,8 @@ export async function saveSettings(s: Settings): Promise<void> {
   await transaction(async (c) => {
     const upsert = "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value";
     await c.query(upsert, ["allowance_per_person", String(s.allowancePerPerson)]);
-    await c.query(upsert, ["savings_rate", String(s.savingsRate)]);
     await c.query(upsert, ["easy_access_target", String(s.easyAccessTarget)]);
+    await c.query(upsert, ["joint_share", String(s.jointShare)]);
   });
 }
 
@@ -272,12 +292,15 @@ export interface Financials {
   calFromPay: number; calFromAccount: number; daniFromAccount: number;
   /** The settings frozen when the month was confirmed; null on drafts. */
   frozenSettings: Settings | null;
+  /** The model a confirmed month was worked out with; null on drafts. */
+  frozenModel: "waterfall" | "share" | null;
 }
 
 export async function getFinancials(id: number): Promise<Financials | null> {
   const rows = await query(`
     SELECT m.id, m.year, m.month, m.confirmed, m.current_easy_access_balance,
       m.settings_allowance_per_person, m.settings_savings_rate, m.settings_easy_access_target,
+      m.settings_model, m.settings_joint_share,
       COALESCE((SELECT SUM(amount) FROM income_entries WHERE month_id = m.id AND person = 'Cal'), 0) AS cal_income,
       COALESCE((SELECT SUM(amount) FROM income_entries WHERE month_id = m.id AND person = 'Dani'), 0) AS dani_income,
       COALESCE((SELECT SUM(amount) FROM bill_entries WHERE month_id = m.id), 0) AS bills_total,
@@ -299,7 +322,9 @@ export async function getFinancials(id: number): Promise<Financials | null> {
       allowancePerPerson: allowance,
       savingsRate: num(r.settings_savings_rate),
       easyAccessTarget: num(r.settings_easy_access_target),
+      jointShare: num(r.settings_joint_share),
     },
+    frozenModel: allowance == null ? null : r.settings_model === "share" ? "share" : "waterfall",
   };
 }
 
@@ -360,8 +385,7 @@ export async function saveMonth(s: MonthSave): Promise<void> {
     }
     await c.query("UPDATE months SET current_easy_access_balance = $1 WHERE id = $2", [s.easyAccessBalance, s.monthId]);
     if (s.finish) {
-      await c.query("UPDATE months SET confirmed = TRUE WHERE id = $1", [s.monthId]);
-      await c.query(FREEZE_SETTINGS_SQL + " WHERE id = $1", [s.monthId]);
+      await c.query(FINISH_SQL, [s.monthId]);
     }
   });
 }
